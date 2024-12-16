@@ -1,0 +1,7 @@
+{
+	"pubId": "ef690a3a-6c2c-4c3d-b5d1-480bb23c6ba1",
+	"adServer": "googletag",
+	"bidTimeout": 2e3,
+	"simplerGPT": true,
+	"tcfTimeout": 2000
+}

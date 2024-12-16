@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0">
+	<title>Test</title>
+	<script>
+		/*
+		window._CMLS = window._CMLS || {
+			debug: true
+		};
+		*/
+	</script>
+	<script
+		src='https://cumulusbeta-express-pro.franklymedia.com/wmal-com/wp-includes/js/jquery/jquery.min.js?ver=3.6.0'
+		id='jquery-core-js'></script>
+	<script
+		src='https://cumulusbeta-express-pro.franklymedia.com/wmal-com/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.3.2'
+		id='jquery-migrate-js'></script>
+
+	<script src="bundle.js"></script>
+
+	<!-- Header bidding wrapper, must be included BEFORE DFP -->
+	<script async src="//prebid.mpwdigital.com/cumulus/cumulus.prebid.js"></script>
+	<script async src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"></script>
+	<script>
+		window.DISABLE_AUTO_REFRESH_ADS = true;
+
+		// SLOTS ARE NOW DEFINED IN THEIR DISPLAY BLOCKS
+		window.GPT_SITE_ID = '/6717/cd.gram.fm';
+		window.googletag = window.googletag || {
+			cmd: []
+		};
+		googletag.cmd.push(function () {
+			googletag.pubads().collapseEmptyDivs();
+			googletag.pubads().disableInitialLoad();
+			googletag.enableServices();
+		});
+		googletag.cmd.push(function () {
+			googletag.pubads().setTargeting('cms-sname', 'TEST 1071');
+			googletag.pubads().setTargeting('cms-sgroup', ['All Sites', 'Cumulus OO']);
+			googletag.pubads().setTargeting('cms-ptitle', 'Home');
+			googletag.pubads().setTargeting('cms-pcat', '');
+		});
+
+		window.tgmp = true;
+	</script>
+</head>
+
+<body class="post-template-default postid-1234 single">
+	<p>Testing FSE scripts</p>
+
+	<a href="#" class="tgmp-switchstream tgmp-streamid-wxyz tgmp-theme-550000 tgmp-autostart">Switch Stream classes</a>
+	<a href="#?tgmp-switchstream&tgmp-streamid-wxyz&tgmp-theme-550000&tgmp-autostart">Switch Stream href</a>
+
+	<div id='div-gpt-ad-1418849849333-1' align="center">
+		<script>
+			googletag.cmd.push(function () {
+				var divId = "div-gpt-ad-1418849849333-1",
+					container = document.getElementById(divId);
+				window.GPT_SITE_SLOTS = window.GPT_SITE_SLOTS || {};
+
+				// Do not call this ad if slot is hidden
+				if (!container || !container.offsetParent) {
+					return;
+				}
+
+				var sizeMap = googletag.sizeMapping()
+					.addSize([970, 0], [
+						[728, 90],
+						[970, 90],
+						[970, 250]
+					])
+					.addSize([750, 0], [
+						[728, 90],
+						[320, 50]
+					])
+					.addSize([0, 0], [
+						[320, 50]
+					])
+					.build();
+
+				window.GPT_SITE_SLOTS[divId] = googletag.defineSlot(
+						GPT_SITE_ID,
+						[
+							[728, 90],
+							[970, 90],
+							[970, 250]
+						],
+						divId
+					)
+					.addService(googletag.pubads())
+					.defineSizeMapping(sizeMap)
+					.setCollapseEmptyDiv(true, false)
+					.setTargeting("pos", "top");
+
+				googletag.display(divId);
+			});
+		</script>
+	</div>
+	<div class="column">
+		<div class="wp-block-post-content" style="width:800px">
+			<p>this is a post</p>
+		</div>
+	</div>
+
+</body>
+
+</html>
