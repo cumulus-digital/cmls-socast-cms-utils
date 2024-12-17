@@ -156,10 +156,14 @@ import config from './config.json';
 
 				// Check existing slots for always refreshers and already returned impressions
 				adTag.getSlots().forEach((slot) => {
+					if (this.slotIsExcluded(slot)) {
+						return;
+					}
 					if (checkAlwaysRefresh(slot)) {
 						this.initSlotTimer(slot);
 					}
-					if (slot.getResponseInformation()) {
+					const responseInfo = slot.getResponseInformation();
+					if (responseInfo) {
 						this.initSlotTimer(slot);
 					}
 				});
