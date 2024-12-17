@@ -154,9 +154,12 @@ import config from './config.json';
 					return true;
 				};
 
-				// Check existing slots for always refreshers
+				// Check existing slots for always refreshers and already returned impressions
 				adTag.getSlots().forEach((slot) => {
 					if (checkAlwaysRefresh(slot)) {
+						this.initSlotTimer(slot);
+					}
+					if (slot.getResponseInformation()) {
 						this.initSlotTimer(slot);
 					}
 				});
