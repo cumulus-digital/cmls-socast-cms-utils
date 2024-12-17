@@ -162,10 +162,17 @@ import config from './config.json';
 					if (checkAlwaysRefresh(slot)) {
 						this.initSlotTimer(slot);
 					}
+					/*
 					const responseInfo = slot.getResponseInformation();
+					log.info(
+						'Slot has response info',
+						window.__CMLSINTERNAL.adTag.listSlotData(slot),
+						responseInfo
+					);
 					if (responseInfo) {
 						this.initSlotTimer(slot);
 					}
+					*/
 				});
 
 				// Check future slots for always refreshers
@@ -331,6 +338,15 @@ import config from './config.json';
 	};
 
 	if (window.__CMLSINTERNAL.adTag) {
+		init();
+	} else {
+		window.addEventListener('cmls-adtag-loaded', () => {
+			init();
+		});
+	}
+
+	/*
+	if (window.__CMLSINTERNAL.adTag) {
 		window.__CMLSINTERNAL.adTag.queue(() => {
 			init();
 		});
@@ -341,4 +357,5 @@ import config from './config.json';
 			});
 		});
 	}
+	*/
 })(window.self);
