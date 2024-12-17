@@ -3,13 +3,13 @@
 	"nameSpace": "autoRefreshAds",
 	"version": "0.5",
 
-	"viewablePercent": 50,
 	"defaultRefreshInMinutes": 1,
 
 	"refreshKey": "refresh",
 	"refreshAlwaysKey": "always_refresh",
 	"refreshNeverKey": "never_refresh",
 	"refreshAllowedValue": "true",
+	"refreshSetValue": "set",
 
 	"ALWAYS_REFRESH_POS": []
 }
