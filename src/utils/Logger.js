@@ -92,7 +92,7 @@ export default class Logger {
 			: (str instanceof Element
 					? str.innerHTML
 					: str.toString()
-			  ).substring(0, length);
+				).substring(0, length);
 	}
 
 	displayHeader(type, message, headerLength = 160) {
@@ -171,12 +171,7 @@ export default class Logger {
 		window.top.console.groupEnd();
 	}
 
-	logMessage(type, message, headerLength = 160) {
-		if (!(typeof console === 'object' && console.groupCollapsed)) {
-			return false;
-		}
-
-		// Only display if debug flag is set
+	debugMessagesEnabled() {
 		let forceDebug = false;
 		try {
 			// support cmlsDebug in session storage or cookie
@@ -193,12 +188,42 @@ export default class Logger {
 				forceDebug = true;
 			}
 		} catch (e) {}
-		if (type !== 'debug' || window?._CMLS?.debug || forceDebug) {
+		return window?._CMLS?.debug || forceDebug;
+	}
+
+	logMessage(type, message, headerLength = 160) {
+		if (!(typeof console === 'object' && console.groupCollapsed)) {
+			return false;
+		}
+
+		// Only display non-debug messages if debug flag is set
+		if (type !== 'debug' || this.debugMessagesEnabled()) {
 			this.displayHeader(type, message, headerLength);
 			//if (headerLength !== Infinity) {
 			window.top.console.debug(message);
 			//}
 			this.displayFooter();
+		}
+	}
+
+	time(identifier) {
+		if (this.debugMessagesEnabled())
+			window.top.console.time(
+				`${this.header[0].replace(/%c\s*/g, '')} / ${identifier}`
+			);
+	}
+
+	timeEnd(identifier) {
+		if (this.debugMessagesEnabled()) {
+			window.top.console.group(
+				`${this.header[0]} ⏲️ ${identifier}`,
+				this.header[1],
+				''
+			);
+			window.top.console.timeEnd(
+				`${this.header[0].replace(/%c\s*/g, '')} / ${identifier}`
+			);
+			window.top.console.groupEnd();
 		}
 	}
 
