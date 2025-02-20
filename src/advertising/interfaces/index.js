@@ -4,6 +4,7 @@
  * All interfaces must inherit from the DefaultInterface
  */
 
+import waitFor from 'Utils/waitFor';
 import APSInterface from './aps-gpt';
 import GPTInterface from './gpt';
 
@@ -25,44 +26,50 @@ const registeredDetectors = [APSInterface, GPTInterface];
 	const { Logger, triggerEvent, domReady } = window.__CMLSINTERNAL.libs;
 	const log = new Logger(`${scriptName} ${version}`);
 
-	const runDetectors = (detectLoop = 0) => {
-		if (window.__CMLSINTERNAL.adTag) {
-			return;
-		}
-		if (detectLoop > 100) {
-			log.warn('Infinite loop detected, no interface found!');
-			return;
-		}
-		log.debug(`Running registered detectors (Loop: ${detectLoop})`);
-		let detected = false;
-		for (const TagInterface of registeredDetectors) {
-			if (!TagInterface.identity || !TagInterface.detectTag) {
-				log.error('Invalid interface', TagInterface);
-				break;
+	log.time('Time to detect interface');
+	waitFor(
+		(loop) => {
+			if (window.__CMLSINTERNAL.adTag) {
+				return true;
 			}
-			log.debug('Checking registered detector', TagInterface.identity);
-			if (TagInterface.detectTag()) {
-				detected = true;
-				window.__CMLSINTERNAL.adTag = new TagInterface();
-				window.__CMLSINTERNAL.adTag.identity = TagInterface.identity;
-				break;
+			log.debug(`Running registered detectors (Loop: ${loop})`);
+			for (const TagInterface of registeredDetectors) {
+				if (!TagInterface.identity || !TagInterface.detectTag) {
+					log.error('Invalid interface', TagInterface);
+					break;
+				}
+				log.debug(
+					'Checking registered detector',
+					TagInterface.identity
+				);
+				if (TagInterface.detectTag()) {
+					return TagInterface;
+				}
 			}
-		}
-		if (detected) {
-			log.info(
-				'Interface detected',
-				window.__CMLSINTERNAL.adTag.identity,
-				window.__CMLSINTERNAL.adTag
+			log.debug(
+				'No interface detected, re-running detection in 0.05 seconds'
 			);
-			triggerEvent(window, 'cmls-adtag-loaded', true);
-			return;
-		}
-		log.warn('No interface detected, re-running detection in 0.15 seconds');
-		setTimeout(() => runDetectors(detectLoop + 1), 50);
-	};
-
-	domReady(() => {
-		log.info('Initializing.');
-		runDetectors();
-	});
+		},
+		5000,
+		50
+	)
+		.then(
+			(TagInterface) => {
+				if (TagInterface) {
+					log.info('Interface detected', TagInterface.identity);
+					window.__CMLSINTERNAL.adTag = new TagInterface();
+					triggerEvent(window, 'cmls-adtag-loaded', true);
+				} else {
+					log.error(
+						'Detection resolved, but Tag Interface not provided!'
+					);
+				}
+			},
+			(error) => {
+				log.error('Detection failed', error);
+			}
+		)
+		.finally(() => {
+			log.timeEnd('Time to detect interface');
+		});
 })(window.self);
