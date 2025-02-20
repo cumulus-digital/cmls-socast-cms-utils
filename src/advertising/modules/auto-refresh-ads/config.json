@@ -9,6 +9,7 @@
 	"refreshAlwaysKey": "always_refresh",
 	"refreshNeverKey": "never_refresh",
 	"refreshAllowedValue": "true",
+	"refreshNotAllowedValue": "false",
 	"refreshSetValue": "set",
 
 	"ALWAYS_REFRESH_POS": []

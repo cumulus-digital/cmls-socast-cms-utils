@@ -8,6 +8,7 @@
  */
 
 import config from './config.json';
+import { isTruthy, includesTruthy, includesFalsy } from 'Utils/truth';
 
 const {
 	scriptName,
@@ -72,9 +73,9 @@ class AdRefresher {
 	slotConditions = {
 		OK: 'Slot is good to refresh.',
 		NEVER: 'Slot is set to never refresh.',
-		TARGET_NEVER: `Slot has ${this.TARGET_NEVER_REFRESH} targeting.`,
+		TARGET_NEVER: `Slot has ${this.TARGET_NEVER_REFRESH_KEY} targeting.`,
 		ALWAYS: 'Slot is set to always refresh.',
-		TARGET_ALWAYS: `Slot has ${this.TARGET_ALWAYS_REFRESH} targeting.`,
+		TARGET_ALWAYS: `Slot has ${this.TARGET_ALWAYS_REFRESH_KEY} targeting.`,
 		EXCLUDED: 'Slot is excluded by autoRefreshAdsExclusion.',
 		DISABLED: 'Refresh is disabled for this slot.',
 		HIDDEN: 'Slot is not currently viewable.',
@@ -90,6 +91,7 @@ class AdRefresher {
 	TARGET_NEVER_REFRESH_KEY = config.refreshNeverKey;
 
 	TARGET_TRUE = config.refreshAllowedValue;
+	TARGET_FALSE = config.refreshNotAllowedValue;
 	TARGET_SET = config.refreshSetValue;
 
 	// Holds timers for slots
@@ -158,6 +160,14 @@ class AdRefresher {
 		return this;
 	}
 
+	isTruthy(value) {
+		return isTruthy(value);
+	}
+
+	includesTruthy(arr) {
+		return includesTruthy(arr);
+	}
+
 	/**
 	 * Checks the state of the page and browser to determine if ads should refresh
 	 */
@@ -210,9 +220,7 @@ class AdRefresher {
 	 */
 	slotHasRefreshKey(slot) {
 		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
-		return (
-			t.includes(this.TARGET_TRUE) || t.includes(String(this.TARGET_TRUE))
-		);
+		return includesTruthy(t);
 	}
 
 	/**
@@ -221,9 +229,7 @@ class AdRefresher {
 	 */
 	slotHasRefreshSetKey(slot) {
 		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
-		return (
-			t.includes(this.TARGET_SET) || t.includes(String(this.TARGET_SET))
-		);
+		return includesTruthy(t);
 	}
 
 	/**
@@ -233,9 +239,9 @@ class AdRefresher {
 	slotIsAlwaysRefresh(slot) {
 		const { ALWAYS, TARGET_ALWAYS } = this.slotConditions;
 		const pos = slot.getTargeting('pos');
-		const targetedAlways = slot
-			.getTargeting(this.TARGET_ALWAYS_REFRESH_KEY)
-			.includes(this.TARGET_TRUE);
+		const targetedAlways = includesTruthy(
+			slot.getTargeting(this.TARGET_ALWAYS_REFRESH_KEY)
+		);
 		if (targetedAlways) {
 			return TARGET_ALWAYS;
 		}
@@ -258,7 +264,10 @@ class AdRefresher {
 			return this.slotConditions.EXCLUDED;
 		}
 
+		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
 		if (
+			includesFalsy(t) ||
+			includesTruthy(slot.getTargeting(this.TARGET_NEVER_REFRESH_KEY)) ||
 			slot
 				.getTargeting(this.TARGET_REFRESH_KEY)
 				.includes(this.TARGET_NEVER_REFRESH_KEY)
