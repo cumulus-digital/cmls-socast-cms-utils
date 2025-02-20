@@ -21,7 +21,7 @@ const registeredDetectors = [APSInterface, GPTInterface];
 ((window, undefined) => {
 	const scriptName = 'ADTAG DETECTION',
 		nameSpace = 'adTagDetection',
-		version = '0.1';
+		version = '0.2';
 
 	const { Logger, triggerEvent, domReady } = window.__CMLSINTERNAL.libs;
 	const log = new Logger(`${scriptName} ${version}`);
