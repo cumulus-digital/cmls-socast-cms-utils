@@ -21,7 +21,7 @@ const registeredDetectors = [APSInterface, GPTInterface];
 ((window, undefined) => {
 	const scriptName = 'ADTAG DETECTION',
 		nameSpace = 'adTagDetection',
-		version = '0.2';
+		version = '0.3';
 
 	const { Logger, triggerEvent, domReady } = window.__CMLSINTERNAL.libs;
 	const log = new Logger(`${scriptName} ${version}`);
@@ -50,7 +50,7 @@ const registeredDetectors = [APSInterface, GPTInterface];
 				'No interface detected, re-running detection in 0.05 seconds'
 			);
 		},
-		5000,
+		10000,
 		50
 	)
 		.then(
