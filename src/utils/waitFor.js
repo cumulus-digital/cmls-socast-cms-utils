@@ -12,8 +12,10 @@ export default function waitFor(
 ) {
 	const start = Date.now();
 
+	let loop = 0;
+
 	function waiting(resolve, reject) {
-		const checked = check();
+		const checked = check(loop);
 		if (checked) {
 			resolve(checked);
 		} else if (Date.now() - start >= timeout) {
@@ -22,6 +24,7 @@ export default function waitFor(
 		} else {
 			setTimeout(waiting.bind(this, resolve, reject), interval);
 		}
+		loop++;
 	}
 	return new Promise(waiting);
 }
