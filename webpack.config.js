@@ -92,7 +92,7 @@ module.exports = (env) => {
 			chunkFilename: '[name].[chunkhash].js',
 			sourceMapFilename: '[name].[chunkhash].map',
 			path: resolve(process.cwd(), 'dist'),
-			chunkLoadingGlobal: 'cmlsAmpUtils',
+			chunkLoadingGlobal: 'cmlsSocastUtils',
 		},
 		resolve: {
 			alias: {
@@ -203,7 +203,7 @@ module.exports = (env) => {
 				__BUILDDATE__: JSON.stringify(__BUILDDATE__),
 			}),
 			new ModuleFederationPlugin({
-				runtime: 'cmls-amp-utils',
+				runtime: 'cmls-socast-utils',
 				shared: [
 					'vendors',
 					'core-js',

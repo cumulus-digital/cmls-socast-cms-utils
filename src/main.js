@@ -48,6 +48,7 @@ import * as GTM from 'Utils/GTM';
 import * as tabVisibility from 'Utils/tabVisibility';
 import triggerEvent from 'Utils/triggerEvent';
 import doDynamicImports from 'Utils/doDynamicImports';
+import waitFor from 'Utils/waitFor.js';
 
 window.__CMLSINTERNAL.libs = {
 	Logger,
@@ -56,6 +57,7 @@ window.__CMLSINTERNAL.libs = {
 	h,
 	Fragment,
 	domReady,
+	waitFor,
 	GTM,
 	tabVisibility,
 	triggerEvent,
@@ -103,4 +105,4 @@ URL BASE: ${window.__CMLSINTERNAL.scriptUrlBase}
 // Log that main has been loaded
 window._CMLS.libsLoaded.push('main');
 
-//require(/* webpackPreload: true, webpackChunkName: 'functionality' */ './functionality.js');
+require(/* webpackPreload: true, webpackChunkName: 'functionality' */ './functionality.js');

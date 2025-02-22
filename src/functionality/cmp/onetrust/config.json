@@ -1,0 +1,9 @@
+{
+	"scriptName": "CMP / OneTrust",
+	"nameSpace": "cmpToolsOneTrust",
+	"version": "0.1",
+	"defaultOptions": {
+		"injectFooterLink": true,
+		"hideFloatingButton": true
+	}
+}

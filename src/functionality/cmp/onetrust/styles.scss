@@ -1,0 +1,66 @@
+#ot-sdk-btn-floating {
+	.ot-no-floating-button & {
+		margin-left: -100px;
+	}
+
+	@media (max-width: 600px) {
+		body:has(#companion-ad320x50 div[data-google-query-id]):not(
+				:has(#companion-ad320x50 div div[style*="height: 0px"])
+			)
+			& {
+			margin-bottom: 50px;
+		}
+	}
+}
+
+#ot-footer-msg {
+	all: unset;
+	box-sizing: border-box !important;
+	display: block !important;
+	float: none !important;
+	clear: both !important;
+	background: #212022 !important;
+	color: #bbb !important;
+	font-family: verdana, sans-serif !important;
+	font-size: 12px !important;
+	line-height: 1.5 !important;
+	text-align: center !important;
+	margin: 0 auto !important;
+	padding: 1.5em 1.5em !important;
+	position: relative !important;
+	width: 100vw !important;
+	left: 50% !important;
+	right: 50% !important;
+	margin-left: -50vw !important;
+	margin-right: -50vw !important;
+	z-index: 99 !important;
+
+	.is-headway-theme & {
+		margin-bottom: -15px;
+	}
+
+	@media (max-width: 400px) {
+		font-size: 11px !important;
+	}
+
+	.inner {
+		all: unset;
+		margin: 0 auto;
+		max-width: 790px;
+	}
+	a {
+		all: unset;
+		cursor: pointer;
+		color: #ddd;
+
+		&:hover {
+			color: #fff;
+		}
+
+		&::before {
+			content: "🍪";
+			margin-right: 0.75em;
+			vertical-align: middle;
+		}
+	}
+}
