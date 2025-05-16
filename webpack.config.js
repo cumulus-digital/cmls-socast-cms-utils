@@ -247,6 +247,13 @@ module.exports = (env) => {
 			},
 
 			client: { overlay: false },
+
+			setupMiddlewares: (middlewares) => {
+				return middlewares.filter(
+					(middleware) =>
+						middleware.name !== 'cross-origin-header-check'
+				);
+			},
 		},
 		watchOptions: {
 			poll: 1000,
