@@ -4,7 +4,7 @@
 	"version": "0.1",
 
 	"_c": "Node where sidewalls will be injected",
-	"injectPoint": "body > main > #sc-content-area",
+	"injectPoint": "body > main > #sc-content-area, #playerBody > #sc-content",
 
 	"_c": "Node used to determine the top spacing for sidewalls",
 	"spacingPoint": "#stickyHeader",
@@ -19,7 +19,7 @@
 	"contentWidth": 1320,
 
 	"_c": "Default header height",
-	"headerHeight": 75,
+	"headerHeight": 0,
 
 	"_c": "Default top sticky position",
 	"topPad": 10,
@@ -27,6 +27,6 @@
 	"_c": "Selectors to determine if legacy sidewalls are implemented",
 	"legacySelector": ".takeover-left div[id^='div-gpt'],.takeover-right div[id^='div-gpt'],.skyscraper-left div[id^='div-gpt'],.skyscraper-right div[id^='div-gpt']",
 
-	"_c": "Time to wait before injecting, useful to anticipate wallpaper",
-	"timeToWait": 2000
+	"_c": "Time to wait before injecting (ms)",
+	"timeToWait": 500
 }

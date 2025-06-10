@@ -25,6 +25,13 @@ export function areSidewallsAllowed() {
 		return false;
 	}
 
+	if (
+		window.matchMedia(`(max-width: ${config.contentWidth + 320}px)`).matches
+	) {
+		log.info('Device width is too narrow. Sidewalls will not be created.');
+		return false;
+	}
+
 	return true;
 }
 
