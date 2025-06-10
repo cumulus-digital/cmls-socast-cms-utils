@@ -1,0 +1,32 @@
+{
+	"scriptName": "SIDEWALL ADS",
+	"nameSpace": "sidewallAds",
+	"version": "0.1",
+
+	"_c": "Node where sidewalls will be injected",
+	"injectPoint": "body > main > #sc-content-area",
+
+	"_c": "Node used to determine the top spacing for sidewalls",
+	"spacingPoint": "#stickyHeader",
+
+	"_c": "Id for the sidewall container",
+	"containerId": "cmls-sidewalls",
+
+	"_c": "Class name for individual sidewalls",
+	"sidewallClass": "cmls-sidewall",
+
+	"_c": "Content area width",
+	"contentWidth": 1320,
+
+	"_c": "Default header height",
+	"headerHeight": 75,
+
+	"_c": "Default top sticky position",
+	"topPad": 10,
+
+	"_c": "Selectors to determine if legacy sidewalls are implemented",
+	"legacySelector": ".takeover-left div[id^='div-gpt'],.takeover-right div[id^='div-gpt'],.skyscraper-left div[id^='div-gpt'],.skyscraper-right div[id^='div-gpt']",
+
+	"_c": "Time to wait before injecting, useful to anticipate wallpaper",
+	"timeToWait": 2000
+}
