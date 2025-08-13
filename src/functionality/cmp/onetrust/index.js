@@ -28,7 +28,11 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	);
 
 	if (!document.getElementById('onetrust-sdk-styles')) {
-		import('./styles.scss').then((style) => {
+		import(
+			/* webpackMode: "eager" */
+			/* webpackChunkName: "functionality/cmp/onetrust/styles" */
+			'./styles.scss'
+		).then((style) => {
 			style.default.use();
 		});
 	}
@@ -73,11 +77,11 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 			function hideFloatingButton() {
 				if (!document.body) return;
 				document.body.classList.remove('ot-show-floating-button');
-				document.body.classList.add('ot-no-floating-button');
+				document.body.classList.add('ot-hide-floating-button');
 			}
 			function showFloatingButton() {
 				if (!document.body) return;
-				document.body.classList.remove('ot-no-floating-button');
+				document.body.classList.remove('ot-hide-floating-button');
 				document.body.classList.add('ot-show-floating-button');
 			}
 

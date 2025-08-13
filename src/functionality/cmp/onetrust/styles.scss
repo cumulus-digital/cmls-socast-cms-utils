@@ -1,5 +1,8 @@
-#ot-sdk-btn-floating {
-	.ot-no-floating-button & {
+#ot-sdk-btn-floating.ot-floating-button {
+	transition: none;
+	margin-left: -100px;
+
+	.ot-hide-floating-button & {
 		margin-left: -100px;
 	}
 	.ot-show-floating-button & {
