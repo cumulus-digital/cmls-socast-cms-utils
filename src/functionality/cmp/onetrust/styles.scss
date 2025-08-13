@@ -2,6 +2,9 @@
 	.ot-no-floating-button & {
 		margin-left: -100px;
 	}
+	.ot-show-floating-button & {
+		margin-left: 0;
+	}
 
 	@media (max-width: 600px) {
 		body:has(#companion-ad320x50 div[data-google-query-id]):not(

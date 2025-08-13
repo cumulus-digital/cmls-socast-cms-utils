@@ -28,10 +28,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	);
 
 	if (!document.getElementById('onetrust-sdk-styles')) {
-		import(
-			/* webpackChunkName: "functionality/cmp/onetrust/styles" */
-			'./styles.scss'
-		).then((style) => {
+		import('./styles.scss').then((style) => {
 			style.default.use();
 		});
 	}
@@ -51,7 +48,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 							class="nav-item-parent hover-effect"
 						>
 							<span class="hover-effect ot-sdk-show-settings">
-								Do Not Sell My Personal Information
+								Cookie Preferences
 							</span>
 						</a>
 					</li>
@@ -63,7 +60,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 						<div id="ot-footer-msg">
 							<div class="inner">
 								<a class="ot-sdk-show-settings">
-									Do Not Sell My Personal Information
+									Cookie Preferences
 								</a>
 							</div>
 						</div>
@@ -73,16 +70,29 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		});
 
 		if (window._CMLS_CMP.oneTrustOptions.hideFloatingButton) {
+			function hideFloatingButton() {
+				if (!document.body) return;
+				document.body.classList.remove('ot-show-floating-button');
+				document.body.classList.add('ot-no-floating-button');
+			}
+			function showFloatingButton() {
+				if (!document.body) return;
+				document.body.classList.remove('ot-no-floating-button');
+				document.body.classList.add('ot-show-floating-button');
+			}
+
+			hideFloatingButton();
+
 			domReady(() => {
-				function hideFloatingButton() {
-					document.body.classList.add('ot-no-floating-button');
-				}
+				hideFloatingButton();
+
 				if (document.querySelector('#playerOverlay')) {
+					showFloatingButton();
 					log.info('Waiting for overlay to be dismissed.');
 					waitFor(
 						() => !document.querySelector('#playerOverlay'),
-						60000,
-						100
+						9999999999,
+						250
 					)
 						.catch(() => {
 							log.debug('Overlay not dismissed.');
@@ -92,8 +102,6 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 							log.info('Overlay dismissed.');
 							hideFloatingButton();
 						});
-				} else {
-					hideFloatingButton();
 				}
 			});
 		}
