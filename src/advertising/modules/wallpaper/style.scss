@@ -1,0 +1,41 @@
+#gpt-wallpaper-slot-container {
+	position: fixed;
+	top: var(--nav-height, 75px);
+	left: 0;
+	width: 100vw;
+	height: 0;
+	overflow: hidden;
+	z-index: 0;
+
+	&.delivered ~ #sc-content-area {
+		box-shadow: 0 0 25px rgba(0, 0, 0, 0.4);
+	}
+
+	&.delivered {
+		height: 100%;
+	}
+}
+
+#gpt-wallpaper-slot {
+	all: initial;
+	display: block !important;
+
+	position: sticky;
+	top: 0;
+	left: 0;
+	z-index: 0;
+	width: 100% !important;
+	height: 100% !important;
+	max-height: 0 !important;
+	overflow: hidden;
+
+	.delivered & {
+		max-height: 100% !important;
+	}
+
+	div,
+	iframe {
+		width: 100%;
+		height: 100%;
+	}
+}
