@@ -9,16 +9,17 @@ if (
 	throw new Error('Functionality library already loaded!');
 }
 
-waitFor(() => window._CMLS.libsLoaded.indexOf('main') > -1).then(
-	() => {
-		require('./functionality/index');
-
-		// Log that functionality has been loaded
-		window._CMLS.libsLoaded.push('functionality');
-	},
-	() => {
-		console.warn(
-			'CMLS Functionality Support: Timed out waiting for main library!'
-		);
-	}
-);
+if (window._CMLS.libsLoaded.includes('main')) {
+	require('./functionality/index');
+} else {
+	waitFor(() => window._CMLS.libsLoaded.indexOf('main') > -1).then(
+		() => {
+			require('./functionality/index');
+		},
+		() => {
+			console.warn(
+				'CMLS Functionality Support: Timed out waiting for main library!'
+			);
+		}
+	);
+}

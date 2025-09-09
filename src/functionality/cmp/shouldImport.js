@@ -10,11 +10,15 @@ export default () => {
 	log.info('Checking for CMP');
 	const waiting = async (resolve, reject) => {
 		try {
-			await waitFor(() => window?.OneTrustStub || window?.OneTrust);
+			await waitFor(
+				() => window?.OneTrustStub || window?.OneTrust,
+				99999,
+				10
+			);
 			log.info('CMP detected');
 			resolve(() => {
 				import(
-					/* webpackChunkName: "functionality/cmp/onetrust" */
+					/* webpackPreload: true, webpackChunkName: "functionality/cmp/onetrust" */
 					'./onetrust/index.js'
 				);
 			});

@@ -22,7 +22,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		window._CMLS_CMP.oneTrustOptions = config.defaultOptions;
 	}
 
-	log.info(
+	log.debug(
 		'Initializing OneTrust alterations.',
 		window._CMLS_CMP.oneTrustOptions
 	);
@@ -37,77 +37,104 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		});
 	}
 
-	if (window._CMLS_CMP.oneTrustOptions.injectFooterLink) {
-		domReady(() => {
-			log.info('Injecting footer link');
-			if (!document.querySelector('.ot-sdk-show-settings')) {
-				const footerNav = document.querySelector(
-					'#playerFooter .footer-links ul,' +
-						'#theFooter .footer-nav ul'
+	const injectFooterLink = () => {
+		log.info('Injecting footer link');
+
+		let linkText = 'Cookie Preferences';
+		if (window.OneTrust?.GetDomainData) {
+			const domainData = window.OneTrust.GetDomainData();
+			if (
+				domainData?.CookieSettingButtonText &&
+				domainData.CookieSettingButtonText !== linkText
+			) {
+				log.debug(
+					'Using custom link text',
+					domainData.CookieSettingButtonText
 				);
-				const footer_link = (
-					<li>
+				linkText = domainData.CookieSettingButtonText;
+			}
+		}
+
+		const footerNav = document.querySelector(
+			'#playerFooter .footer-links ul,' + '#theFooter .footer-nav ul'
+		);
+		if (footerNav) {
+			footerNav.append(
+				<li>
+					<a
+						href="javascript:void(0)"
+						class="nav-item-parent hover-effect"
+					>
+						<span class="hover-effect ot-sdk-show-settings">
+							{linkText}
+						</span>
+					</a>
+				</li>
+			);
+		} else {
+			document.body.append(
+				<div id="ot-footer-msg">
+					<div class="inner">
 						<a
 							href="javascript:void(0)"
-							class="nav-item-parent hover-effect"
+							class="ot-sdk-show-settings"
 						>
-							<span class="hover-effect ot-sdk-show-settings">
-								Cookie Preferences
-							</span>
+							{linkText}
 						</a>
-					</li>
-				);
-				if (footerNav) {
-					footerNav.append(footer_link);
-				} else {
-					document.body.append(
-						<div id="ot-footer-msg">
-							<div class="inner">
-								<a class="ot-sdk-show-settings">
-									Cookie Preferences
-								</a>
-							</div>
-						</div>
-					);
-				}
-			}
+					</div>
+				</div>
+			);
+		}
+	};
+
+	if (window._CMLS_CMP.oneTrustOptions.injectFooterLink) {
+		waitFor(() => window.OneTrust?.GetDomainData, 1000).then(() => {
+			injectFooterLink();
 		});
+	} else {
+		log.debug(
+			'Not injecting footer link, oneTrustOptions.injectFooterLink is false'
+		);
+	}
 
-		if (window._CMLS_CMP.oneTrustOptions.hideFloatingButton) {
-			function hideFloatingButton() {
-				if (!document.body) return;
-				document.body.classList.remove('ot-show-floating-button');
-				document.body.classList.add('ot-hide-floating-button');
-			}
-			function showFloatingButton() {
-				if (!document.body) return;
-				document.body.classList.remove('ot-hide-floating-button');
-				document.body.classList.add('ot-show-floating-button');
-			}
+	if (window._CMLS_CMP.oneTrustOptions.hideFloatingButton) {
+		function hideFloatingButton() {
+			if (!document.body) return;
+			document.body.classList.remove('ot-show-floating-button');
+			document.body.classList.add('ot-hide-floating-button');
+		}
+		function showFloatingButton() {
+			if (!document.body) return;
+			document.body.classList.remove('ot-hide-floating-button');
+			document.body.classList.add('ot-show-floating-button');
+		}
 
+		hideFloatingButton();
+
+		domReady(() => {
 			hideFloatingButton();
 
-			domReady(() => {
-				hideFloatingButton();
-
-				if (document.querySelector('#playerOverlay')) {
-					showFloatingButton();
-					log.info('Waiting for overlay to be dismissed.');
-					waitFor(
-						() => !document.querySelector('#playerOverlay'),
-						9999999999,
-						250
-					)
-						.catch(() => {
-							log.debug('Overlay not dismissed.');
-							hideFloatingButton();
-						})
-						.finally(() => {
-							log.info('Overlay dismissed.');
-							hideFloatingButton();
-						});
-				}
-			});
-		}
+			if (document.querySelector('#playerOverlay')) {
+				showFloatingButton();
+				log.info('Waiting for overlay to be dismissed.');
+				waitFor(
+					() => !document.querySelector('#playerOverlay'),
+					9999999999,
+					250
+				)
+					.catch(() => {
+						log.debug(
+							'Overlay not dismissed before timeout, hiding floating OT button.'
+						);
+						hideFloatingButton();
+					})
+					.finally(() => {
+						log.info(
+							'Overlay dismissed, hiding floating OT button.'
+						);
+						hideFloatingButton();
+					});
+			}
+		});
 	}
 })(window.self);
