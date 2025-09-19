@@ -13,6 +13,10 @@
 
 	&.delivered {
 		height: 100%;
+
+		~ .bgd-img-container {
+			display: none;
+		}
 	}
 }
 

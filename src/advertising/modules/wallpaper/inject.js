@@ -49,9 +49,14 @@ const log = new window.__CMLSINTERNAL.Logger(
 		}
 
 		testConditions() {
-			const hasInjectPoint = this.context.document.querySelector(
-				this.injectPoint
-			);
+			let injectPoint = this.injectPoint;
+			let injectBefore = false;
+			if (this.injectPoint.includes('::before')) {
+				injectBefore = true;
+				injectPoint = injectPoint.replace('::before', '');
+			}
+			const hasInjectPoint =
+				this.context.document.querySelector(injectPoint);
 			if (!hasInjectPoint) {
 				log.warn('Inject point not found!');
 				return false;
@@ -76,9 +81,14 @@ const log = new window.__CMLSINTERNAL.Logger(
 		}
 
 		generateSlot() {
-			const injectPoint = this.context.document.querySelector(
-				this.injectPoint
-			);
+			let injectPoint = this.injectPoint;
+			let injectBefore = false;
+			if (this.injectPoint.includes('::before')) {
+				injectBefore = true;
+				injectPoint = injectPoint.replace('::before', '');
+			}
+
+			injectPoint = this.context.document.querySelector(injectPoint);
 
 			if (!injectPoint) {
 				log.warn('Inject point not found!');
@@ -100,7 +110,11 @@ const log = new window.__CMLSINTERNAL.Logger(
 			this.container = <div id={`${this.containerId}`} />;
 			this.slotDiv = <div id={`${this.divId}`} />;
 			this.container.appendChild(this.slotDiv);
-			injectPoint.prepend(this.container);
+			if (injectBefore) {
+				injectPoint.before(this.container);
+			} else {
+				injectPoint.prepend(this.container);
+			}
 
 			this.adTag.queue(() => {
 				this.slot = this.adTag.defineSlot({
