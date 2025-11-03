@@ -14,9 +14,8 @@ function getBasicPost(additional_classes = []) {
 
 	let postClasses = [
 		'post-template-default',
-		'feed_posts-template',
-		'feed_posts-template-single',
-		'feed_posts-template-default',
+		'single-post',
+		'single-format-standard',
 	];
 	if (additional_classes?.length) {
 		postClasses = postClasses.concat(additional_classes);
@@ -35,29 +34,14 @@ function getBasicPost(additional_classes = []) {
 		return false;
 	}
 
-	let entry = doc.querySelector(
-		`.wrapper-content .column-1 #post-${postId},` +
-			//`.express-content .wp-block-post-content:has(.themify_builder_content[data-postid="${postId}"]),` +
-			'.express-content .wp-block-post-content'
-	);
+	let entry = doc.querySelector('#sc-content-area .sc-content .mainArticle');
 	if (!entry) {
 		log.info('Could not discover post content.');
 		return false;
 	}
-	// For FSE, let's try to get the themify block within post content to ensure we get the right post
-	if (entry.classList.contains('wp-block-post-content')) {
-		let themify = doc.querySelector(
-			`.themify_builder_content[data-postid="${postId}"]`
-		);
-		if (
-			themify?.parentElement?.classList.contains('wp-block-post-content')
-		) {
-			entry = themify.parentElement;
-		}
-	}
 
 	const entryBox = entry.getBoundingClientRect();
-	if (entryBox.width > 800 || entryBox.width < 400) {
+	if (entryBox.width > 900 || entryBox.width < 300) {
 		log.info('Post content width is suspicious.', entryBox.width);
 		return false;
 	}

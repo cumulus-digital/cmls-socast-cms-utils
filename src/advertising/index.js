@@ -5,6 +5,7 @@ import './modules/amazon-publisher-services/no-export.js';
 import shouldImportAutoRefreshAds from './modules/auto-refresh-ads/shouldImport';
 import shouldImportWallpaper from './modules/wallpaper/shouldImport';
 import shouldImportSidewalls from './modules/sidewalls/shouldImport';
+import shouldImportPaidContent from './modules/paid-content/shouldImport';
 
 window._CMLS = window._CMLS || {};
 window._CMLS.libsLoaded = window._CMLS.libsLoaded || [];
@@ -45,6 +46,10 @@ const imports = [
 	{
 		name: 'advertising/sidewalls',
 		check: shouldImportSidewalls,
+	},
+	{
+		name: 'advertising/paid-content',
+		check: shouldImportPaidContent,
 	},
 ];
 window.__CMLSINTERNAL.libs.doDynamicImports(imports);

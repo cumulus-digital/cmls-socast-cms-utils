@@ -49,6 +49,7 @@ import * as tabVisibility from 'Utils/tabVisibility';
 import triggerEvent from 'Utils/triggerEvent';
 import doDynamicImports from 'Utils/doDynamicImports';
 import waitFor from 'Utils/waitFor.js';
+import getBasicPost from 'Utils/getBasicPost';
 
 window.__CMLSINTERNAL.libs = {
 	Logger,
@@ -61,6 +62,7 @@ window.__CMLSINTERNAL.libs = {
 	GTM,
 	tabVisibility,
 	triggerEvent,
+	getBasicPost,
 	lodash: {
 		throttle,
 		debounce,
