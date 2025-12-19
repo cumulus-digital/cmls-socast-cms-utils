@@ -28,5 +28,5 @@
 	"legacySelector": ".takeover-left div[id^='div-gpt'],.takeover-right div[id^='div-gpt'],.skyscraper-left div[id^='div-gpt'],.skyscraper-right div[id^='div-gpt']",
 
 	"_c": "Time to wait before injecting (ms)",
-	"timeToWait": 500
+	"timeToWait": 250
 }
