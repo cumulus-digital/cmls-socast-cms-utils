@@ -10,7 +10,8 @@
 		content: "Advertisement";
 		position: absolute;
 		top: -16px;
-		left: 0;
+		left: 50%;
+		transform: translateX(-50%);
 		background: rgba(0, 0, 0, 0.5);
 		color: white;
 		font-weight: 700;
