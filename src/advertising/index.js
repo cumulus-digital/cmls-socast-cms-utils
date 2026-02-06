@@ -6,6 +6,7 @@ import shouldImportAutoRefreshAds from './modules/auto-refresh-ads/shouldImport'
 import shouldImportWallpaper from './modules/wallpaper/shouldImport';
 import shouldImportSidewalls from './modules/sidewalls/shouldImport';
 import shouldImportPaidContent from './modules/paid-content/shouldImport';
+import shouldImportPlayerCompanion300x250 from './modules/player-companion-300x250/shouldImport';
 
 window._CMLS = window._CMLS || {};
 window._CMLS.libsLoaded = window._CMLS.libsLoaded || [];
@@ -38,6 +39,10 @@ const imports = [
 		check: shouldImportAutoRefreshAds,
 		loadImmediately: true,
 		loaderOptions: { async: false, defer: false },
+	},
+	{
+		name: 'advertising/player-companion-300x250',
+		check: shouldImportPlayerCompanion300x250,
 	},
 	{
 		name: 'advertising/wallpaper',

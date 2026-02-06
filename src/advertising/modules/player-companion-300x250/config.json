@@ -1,0 +1,11 @@
+{
+	"scriptName": "PLAYER COMPANION 300x250",
+	"nameSpace": "playerCompanion300x250",
+	"version": "0.1",
+
+	"_c": "Node where companion will be injected",
+	"injectPoint": "body",
+
+	"_c": "Companion tag div ID",
+	"companionTagId": "td_companion_300x250"
+}
