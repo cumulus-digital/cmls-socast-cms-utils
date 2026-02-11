@@ -43,5 +43,9 @@
 		& {
 		bottom: -300px;
 		margin-bottom: 55px;
+
+		&:has(*) {
+			bottom: 0;
+		}
 	}
 }
