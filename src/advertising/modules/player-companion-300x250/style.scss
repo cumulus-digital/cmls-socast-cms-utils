@@ -1,12 +1,18 @@
 #td_companion_300x250 {
 	display: flex;
-	justify-content: center;
+	justify-content: right;
 	position: fixed;
 	bottom: -250px;
 	left: 0;
 	transition: bottom 0.5s ease-out;
 	width: 100%;
+	padding-right: 10px;
 	z-index: 2147483647;
+
+	@media (max-width: 800px) {
+		justify-content: center;
+		padding-right: 0;
+	}
 
 	&:has(*) {
 		bottom: 0;
