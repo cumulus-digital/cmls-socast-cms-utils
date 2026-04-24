@@ -303,7 +303,10 @@ class AdRefresher {
 
 		this.deleteSlotTimer(slot);
 		this.timers.set(slot, fireTime);
-		slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_SET);
+		//slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_SET);
+		slot.setConfig({
+			targeting: { [this.TARGET_REFRESH_KEY]: this.TARGET_SET },
+		});
 	}
 
 	deleteSlotTimer(slot) {
@@ -314,7 +317,10 @@ class AdRefresher {
 				this.slotHasRefreshSetKey(slot) ||
 				this.slotHasRefreshKey(slot)
 			) {
-				slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_TRUE);
+				//slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_TRUE);
+				slot.setConfig({
+					targeting: { [this.TARGET_REFRESH_KEY]: this.TARGET_TRUE },
+				});
 			}
 		}
 	}

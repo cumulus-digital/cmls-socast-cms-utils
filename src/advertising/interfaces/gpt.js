@@ -41,7 +41,10 @@ export default class GPTInterface extends DefaultInterface {
 					e
 				);
 				e.slot._cm_displayed = true;
-				e.slot.setTargeting(me.initialRequestKey, true);
+				//e.slot.setTargeting(me.initialRequestKey, true);
+				e.slot.setConfig({
+					targeting: { [`${me.initialRequestKey}`]: 'true' },
+				});
 			}
 		});
 
@@ -227,27 +230,49 @@ export default class GPTInterface extends DefaultInterface {
 			this.log.debug('Slot created', this.listSlotData(slot));
 		}
 
+		const slotConfig = {};
+
 		if (settings.hasOwnProperty('collapse')) {
 			if (!Array.isArray(settings.collapse)) {
 				settings.collapse = [settings.collapse];
 			}
-			slot = slot.setCollapseEmptyDiv.apply(slot, settings.collapse);
+			//slot = slot.setCollapseEmptyDiv.apply(slot, settings.collapse);
+			var collapseConfig = null;
+			if (settings.collapse[0] == true) {
+				collapseConfig = 'ON_NO_FILL';
+			}
+			if (settings.collapse[0] == false) {
+				collapseConfig = 'DISABLED';
+			}
+			if (settings.collapse.length > 1 && settings.collapse[1] == true) {
+				collapseConfig = 'BEFORE_FETCH';
+			}
+			slotConfig.collapseDiv = collapseConfig;
 		}
 
 		if (settings.init) {
 			slot = slot.addService(this.pubads());
 		}
 
+		const targetingConfig = {};
 		settings.targeting = Array.isArray(settings.targeting)
 			? settings.targeting
 			: [settings.targeting];
 		settings.targeting.forEach((target) => {
 			for (const k in target) {
 				if (target?.hasOwnProperty(k)) {
-					slot = slot.setTargeting(k, target[k]);
+					targetingConfig[k] = target[k];
+					//slot = slot.setTargeting(k, target[k]);
 				}
 			}
 		});
+		if (Object.keys(targetingConfig).length) {
+			slotConfig.targeting = targetingConfig;
+		}
+
+		if (Object.keys(slotConfig).length) {
+			slot = slot.setConfig(slotConfig);
+		}
 
 		this.log.debug('Defined slot', {
 			slot: this.listSlotData(slot).shift(),
