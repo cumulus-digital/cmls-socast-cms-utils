@@ -348,7 +348,7 @@ class AdRefresher {
 			}
 		});
 		if (refreshSlots.length) {
-			log.debug(
+			log.info(
 				`${new Date().toLocaleString()} Refreshing ${refreshSlots.length} slots`,
 				slotData
 			);
