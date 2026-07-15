@@ -11,16 +11,26 @@ export default () => {
 	const waiting = async (resolve, reject) => {
 		try {
 			await waitFor(
-				() => window?.OneTrustStub || window?.OneTrust,
+				() =>
+					window?.OneTrustStub || window?.OneTrust || window?.truste,
 				99999,
 				10
 			);
-			log.info('CMP detected');
 			resolve(() => {
-				import(
-					/* webpackPreload: true, webpackChunkName: "functionality/cmp/onetrust" */
-					'./onetrust/index.js'
-				);
+				if (window.OneTrustStub || window?.OneTrust) {
+					log.info('OneTrust CMP detected');
+					import(
+						/* webpackPreload: true, webpackChunkName: "functionality/cmp/onetrust" */
+						'./onetrust/index.js'
+					);
+				}
+				if (window.truste) {
+					log.info('TrustArc CMP detected');
+					import(
+						/* webpackPreload: true, webpackChunkName: "functionality/cmp/trustarc" */
+						'./trustarc/index.js'
+					);
+				}
 			});
 		} catch (e) {
 			log.info('CMP not detected');

@@ -1,0 +1,70 @@
+#te-footer-msg {
+	all: unset;
+	box-sizing: border-box !important;
+	display: block !important;
+	float: none !important;
+	clear: both !important;
+	background: #212022 !important;
+	color: #bbb !important;
+	font-family: verdana, sans-serif !important;
+	font-size: 12px !important;
+	line-height: 1.5 !important;
+	text-align: center !important;
+	margin: 0 auto !important;
+	padding: 1.5em 1.5em !important;
+	position: relative !important;
+	width: 100vw !important;
+	left: 50% !important;
+	right: 50% !important;
+	margin-left: -50vw !important;
+	margin-right: -50vw !important;
+	z-index: 99 !important;
+
+	.is-headway-theme & {
+		margin-bottom: -15px;
+	}
+
+	@media (max-width: 400px) {
+		font-size: 11px !important;
+	}
+
+	.inner {
+		all: unset;
+		margin: 0 auto;
+		max-width: 790px;
+	}
+	a {
+		all: unset;
+		cursor: pointer;
+		color: #ddd;
+
+		&:hover {
+			color: #fff;
+		}
+
+		&::before {
+			content: "🍪";
+			margin-right: 0.75em;
+			vertical-align: middle;
+		}
+	}
+}
+
+#playerFooter .footer-links ul #teconsent a::before,
+#theFooter .footer-nav ul #teconsent a::before,
+#te-footer-msg a::before {
+	content: "";
+	background-image: url("data:image/svg+xml,%3Csvg enable-background='new 0 0 30 14' viewBox='0 0 30 14' xmlns='http://www.w3.org/2000/svg'%3E%3Cg%3E%3Cpath clip-rule='evenodd' d='m7.4 12.8h6.8l3.1-11.6h-9.9c-3.2-0-5.8 2.6-5.8 5.8s2.6 5.8 5.8 5.8z' fill='%23fff' fill-rule='evenodd'/%3E%3Cg%3E%3Cpath clip-rule='evenodd' d='m22.6 0h-15.2c-3.9 0-7 3.1-7 7s3.1 7 7 7h15.2c3.9 0 7-3.1 7-7s-3.2-7-7-7zm-21 7c0-3.2 2.6-5.8 5.8-5.8h9.9l-3.1 11.6h-6.8c-3.2 0-5.8-2.6-5.8-5.8z' fill='%2306f' fill-rule='evenodd'/%3E%3Cpath d='m24.6 4c.2.2.2.6 0 .8l-2.1 2.2 2.2 2.2c.2.2.2.6 0 .8s-.6.2-.8 0l-2.2-2.2-2.2 2.2c-.2.2-.6.2-.8 0s-.2-.6 0-.8l2.1-2.2-2.2-2.2c-.2-.2-.2-.6 0-.8s.6-.2.8 0l2.2 2.2 2.2-2.2c.2-.2.6-.2.8 0z' fill='%23fff'/%3E%3Cpath d='m12.7 4.1c.2.2.3.6.1.8l-4.2 4.9c-.1.1-.2.2-.3.2-.2.1-.5.1-.7-.1l-2.2-2.2c-.2-.2-.2-.6 0-.8s.6-.2.8 0l1.8 1.7 3.8-4.5c.2-.2.6-.2.9 0z' fill='%2306f'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+	height: 1em;
+	width: 2em;
+	display: inline-block;
+	background-size: 100%;
+	background-repeat: no-repeat;
+	background-position: center;
+	vertical-align: bottom;
+	margin-right: 0.25em;
+}
+
+#playerFooter .footer-links ul #teconsent a::before {
+	height: 100%;
+}

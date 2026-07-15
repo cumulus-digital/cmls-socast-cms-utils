@@ -1,4 +1,5 @@
 {
-	"upgrade": true,
-	"reject": ["sass"]
+	"upgrade": false,
+	"reject": ["sass"],
+	"cooldown": "2d"
 }

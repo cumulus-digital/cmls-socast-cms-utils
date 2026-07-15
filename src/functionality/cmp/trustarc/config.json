@@ -1,0 +1,8 @@
+{
+	"scriptName": "CMP / TrustArc",
+	"nameSpace": "cmpToolsTrustArc",
+	"version": "0.1",
+	"defaultOptions": {
+		"injectFooterLink": true
+	}
+}

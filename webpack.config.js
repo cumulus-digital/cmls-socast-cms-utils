@@ -148,30 +148,55 @@ module.exports = (env) => {
 					use: {
 						loader: require.resolve('babel-loader'),
 						options: {
-							babelrc: true,
-							configFile: true,
+							// FORCE webpack to use only these options and ignore conflicting files
+							babelrc: false,
+							configFile: false,
+							assumptions: {
+								arrayLikeIsIterable: true,
+								constantReexports: true,
+								ignoreFunctionLength: true,
+								ignoreToPrimitiveHint: true,
+								mutableTemplateObject: true,
+								noClassCalls: true,
+								noDocumentAll: true,
+								objectRestNoSymbols: true,
+								privateFieldsAsProperties: true,
+								pureGetters: true,
+								setClassMethods: true,
+								setComputedProperties: true,
+								setPublicClassFields: true,
+								setSpreadProperties: true,
+								skipForOfIteratorClosing: true,
+								superIsCallableConstructor: true,
+							},
 							presets: [
-								'@babel/preset-react',
+								[
+									'@babel/preset-react',
+									{
+										runtime: 'classic',
+										pragma: 'h', // Moves pragma here safely
+										pragmaFrag: 'Fragment', // Moves pragmaFrag here safely
+									},
+								],
 								[
 									'@babel/preset-env',
 									{
-										loose: true,
 										debug: true,
-										useBuiltIns: 'usage',
-										corejs: require('core-js/package.json')
-											.version,
+										exclude: ['transform-typeof-symbol'],
 									},
 								],
 							],
 							plugins: [
-								['@babel/plugin-transform-runtime'],
 								[
-									'@babel/plugin-transform-react-jsx',
+									'babel-plugin-polyfill-corejs3',
 									{
-										pragma: 'h',
-										pragmaFrag: 'Fragment',
+										method: 'usage-global',
+										version: require('core-js/package.json')
+											.version,
 									},
 								],
+								['@babel/plugin-transform-runtime'],
+								// Removed '@babel/plugin-transform-react-jsx' to eliminate conflicts
 							],
 						},
 					},

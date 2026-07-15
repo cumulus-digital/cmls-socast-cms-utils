@@ -1,6 +1,6 @@
 import './interfaces';
 import './modules/register-adpath/no-export.js';
-import './modules/amazon-publisher-services/no-export.js';
+//import './modules/amazon-publisher-services/no-export.js'; // DEPRECATED
 
 import shouldImportAutoRefreshAds from './modules/auto-refresh-ads/shouldImport';
 import shouldImportWallpaper from './modules/wallpaper/shouldImport';
