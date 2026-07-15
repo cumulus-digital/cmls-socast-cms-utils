@@ -3,6 +3,7 @@
 	"nameSpace": "cmpToolsTrustArc",
 	"version": "0.1",
 	"defaultOptions": {
-		"injectFooterLink": true
+		"injectFooterLink": true,
+		"reloadAfterConsent": true
 	}
 }

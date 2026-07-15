@@ -5,7 +5,6 @@ const { scriptName, nameSpace, version, defaultOptions } = config;
 const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 
 ((window, undefined) => {
-	log.info('Initializing TrustArc');
 	if (window?._CMLS_CMP_DISABLE_OT_OPT) {
 		log.warn(
 			'TrustArc custom handling disabled by _CMLS_CMP_DISABLE_OT_OPT'
@@ -24,7 +23,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	}
 
 	log.debug(
-		'Initializing TrustArc alterations.',
+		'Initializing TrustArc customizations.',
 		window._CMLS_CMP.oneTrustOptions
 	);
 
@@ -39,7 +38,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	}
 
 	const injectFooterLink = () => {
-		log.info('Injecting footer link');
+		log.debug('Injecting footer link');
 
 		const footerNav = document.querySelector(
 			'#playerFooter .footer-links ul,' + '#theFooter .footer-nav ul'
@@ -64,6 +63,13 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		}
 	};
 
+	const injectBanner = () => {
+		log.debug('Injecting banner placeholder');
+		if (!window.document.getElementById('consent-banner')) {
+			window.document.body.append(<div id="consent-banner"></div>);
+		}
+	};
+
 	if (window._CMLS_CMP.oneTrustOptions.injectFooterLink) {
 		if (!window.document.getElementById('teconsent')) {
 			injectFooterLink();
@@ -72,5 +78,42 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		log.info(
 			'Not injecting footer link, oneTrustOptions.injectFooterLink is false'
 		);
+	}
+	if (!window.document.getElementById('consent-banner')) {
+		injectBanner();
+	} else {
+		log.info('Banner already exists in HTML.');
+	}
+
+    if (window._CMLS_CMP.oneTrustOptions.reloadAfterConsent) {
+		// Handle reloading the page after user chooses preference
+		window.addEventListener(
+			'message',
+			function (ev) {
+				var data = null;
+				try {
+					data = JSON.parse(ev.data);
+				} catch (e) {
+					return;
+				}
+				if (
+					data &&
+					data.source === 'preference_manager' &&
+					data.message === 'submit_preferences'
+				) {
+					setTimeout(function () {
+						window.location.reload();
+					}, 500);
+				}
+			},
+			false
+		);
+		document.body.addEventListener('click', function (ev) {
+			if (ev && ev.target && ev.target.id === 'truste-consent-button') {
+				setTimeout(function () {
+					window.location.reload();
+				}, 500);
+			}
+		});
 	}
 })(window.self);
