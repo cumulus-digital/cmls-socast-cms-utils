@@ -19,7 +19,8 @@
 	}
 }
 
-#te-footer-msg {
+#te-footer-msg,
+body > #teconsent {
 	all: unset;
 	box-sizing: border-box !important;
 	display: block !important;
