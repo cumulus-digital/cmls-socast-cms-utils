@@ -7,7 +7,6 @@ const log = new Logger(`${scriptName} ${version}`);
 
 export default () => {
 	const waiting = (resolve) => {
-		const { getBasicPost } = window.__CMLSINTERNAL.libs;
 		if (window.self.NO_PAIDCONTENT || window.self.NO_PAID_CONTENT) {
 			log.info('NO_PAIDCONTENT flag found, exiting.');
 			resolve(false);

@@ -1,0 +1,23 @@
+/* Fix for top bar */
+#dml-root {
+	z-index: 2;
+}
+#dml-root #dml-viewer {
+	top: var(--nav-height);
+	height: calc(100% - var(--nav-height));
+}
+/* Fix margins */
+#dml-root #dml-viewer .dml-chrome {
+	height: calc(100% - 20px);
+}
+.dml-widget-container .dml-wrapper .dml-header {
+	padding-left: 0;
+	padding-right: 0;
+}
+@media (min-width: 600px) {
+	.dml-widget-container .dml-wrapper .dml-stack {
+		margin-left: -8px;
+		margin-right: -8px;
+		max-width: calc(100% + 16px) !important;
+	}
+}

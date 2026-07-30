@@ -85,7 +85,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		log.info('Banner already exists in HTML.');
 	}
 
-    if (window._CMLS_CMP.oneTrustOptions.reloadAfterConsent) {
+	if (window._CMLS_CMP.oneTrustOptions.reloadAfterConsent) {
 		// Handle reloading the page after user chooses preference
 		window.addEventListener(
 			'message',

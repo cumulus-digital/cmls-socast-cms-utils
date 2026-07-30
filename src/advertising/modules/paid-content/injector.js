@@ -1,14 +1,14 @@
 ((window, undefined) => {
 	const injectables = {
-		Newsmax: './injectables/newsmax.js',
-		//Hindsight: './injectables/hindsight.js',
+		TopicalFruit: './injectables/topical-fruit/topical-fruit.js',
+		revContent: './injectables/rev-content.js',
 	};
 
-	const { h, domReady, getBasicPost, Logger } = window.__CMLSINTERNAL.libs;
-
-	const scriptName = 'PAID CONTENT INJECTOR';
-	const nameSpace = 'paidContentInjector';
+	const scriptName = 'PAID CONTENT RUNNER';
+	const nameSpace = 'paidContentRunner';
 	const version = '0.1';
+
+	const { h, domReady, getBasicPost, Logger } = window.__CMLSINTERNAL.libs;
 
 	const log = new Logger(`${scriptName} ${version}`);
 
@@ -23,43 +23,43 @@
 
 		if (!entry) {
 			log.info('No post entry container found.');
-			return;
+		} else {
+			const injectPoint = (
+				<div
+					id={`PAIDCONTENT-${Math.ceil(Math.random() * 6000000)}}`}
+					class="injected-paid-content"
+					style="position: relative !important; width: 100% !important; top: 0; overflow: hidden;"
+				/>
+			);
+
+			entry.after(injectPoint);
 		}
 
-		const injectPoint = (
-			<div
-				id={`PAIDCONTENT-${Math.ceil(Math.random() * 6000000)}}`}
-				class="injected-paid-content"
-				style="position: relative !important; width: 100% !important; top: 0; overflow: hidden;"
-			/>
-		);
-
-		entry.after(injectPoint);
-
 		for (const i in injectables) {
-			let injected = false;
+			let run = false;
 			if (typeof injectables[i] === 'function') {
-				injectPoint.append(injectables[i]());
-				injected = true;
+				log.debug('Running injectable', i);
+				injectables[i]();
+				run = true;
 			} else if (typeof injectables[i] === 'string') {
-				log.debug('Importing', i);
+				log.debug('Importing injectable', i);
 				import(
 					/* webpackChunkName: 'advertising/paid-content/[request]' */
 					`${injectables[i]}`
 				).then((injectable) => {
-					//log.warn(injectable);
 					if (typeof injectable?.default === 'function') {
 						const content = injectable.default();
-						if (content) {
+						if (content && entry) {
+							log.info('Injecting', i);
 							injectPoint.append(content);
 						}
 					}
 				});
-				injected = true;
+				run = true;
 			}
 
-			if (injected) {
-				log.debug('Injected', i);
+			if (run) {
+				log.info('Ran Injectable', i);
 			}
 		}
 	});
