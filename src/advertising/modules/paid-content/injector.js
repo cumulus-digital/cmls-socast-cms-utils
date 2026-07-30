@@ -1,7 +1,7 @@
 ((window, undefined) => {
 	const injectables = {
 		TopicalFruit: './injectables/topical-fruit/topical-fruit.js',
-		revContent: './injectables/rev-content.js',
+		//revContent: './injectables/rev-content.js',
 	};
 
 	const scriptName = 'PAID CONTENT RUNNER';
