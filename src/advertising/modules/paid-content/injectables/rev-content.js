@@ -33,19 +33,21 @@ export default () => {
 		}
 
 		const div = (
-			<>
-				<div
-					data-widget-host="revcontent"
-					data-pub-id={pubId}
-					data-widget-id={widgetId}
-				></div>
-				<script
-					src={`https://delivery.revcontent.com/${pubId}/${widgetId}/widget.js`}
-					async
-				></script>
-			</>
+			<div
+				data-widget-host="revcontent"
+				data-pub-id={pubId}
+				data-widget-id={widgetId}
+			></div>
+		);
+
+		const scr = (
+			<script
+				src={`https://delivery.revcontent.com/${pubId}/${widgetId}/widget.js`}
+				async
+			></script>
 		);
 		scContent.append(div);
+		scContent.append(scr);
 		log.info('Injected');
 	}
 };
