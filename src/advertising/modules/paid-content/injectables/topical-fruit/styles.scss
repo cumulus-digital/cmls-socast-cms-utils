@@ -3,8 +3,8 @@
 	z-index: 2;
 }
 #dml-root #dml-viewer {
-	top: var(--nav-height);
-	height: calc(100% - var(--nav-height));
+	top: var(--nav-height, 0px);
+	height: calc(100% - var(--nav-height, 0px));
 }
 /* Fix margins */
 #dml-root #dml-viewer .dml-chrome {
