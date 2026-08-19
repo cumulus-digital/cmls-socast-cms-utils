@@ -90,3 +90,15 @@ body > #teconsent {
 #playerFooter .footer-links ul #teconsent a::before {
 	height: 100%;
 }
+
+#te-player-overlay-prefs {
+	all: unset;
+	cursor: pointer;
+	color: #ddd;
+	margin-top: 1em;
+
+	&:hover {
+		color: #fff;
+		text-decoration: underline;
+	}
+}

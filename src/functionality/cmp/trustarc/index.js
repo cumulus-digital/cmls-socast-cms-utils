@@ -46,17 +46,20 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		if (footerNav) {
 			footerNav.append(
 				<li>
-					<span
-						id="teconsent"
-						class="nav-item-parent hover-effect"
-					></span>
+					<span id="teconsent" class="nav-item-parent hover-effect">
+						{window.truste?.eu?.bindMap?.icon ||
+							'Cookie Preferences'}
+					</span>
 				</li>
 			);
 		} else {
 			document.body.append(
 				<div id="te-footer-msg">
 					<div class="inner">
-						<span id="teconsent"></span>
+						<span id="teconsent">
+							{window.truste?.eu?.bindMap?.icon ||
+								'Cookie Preferences'}
+						</span>
 					</div>
 				</div>
 			);
@@ -84,6 +87,24 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	} else {
 		log.info('Banner already exists in HTML.');
 	}
+
+	// Inject preferences link for player overlay
+	domReady(() => {
+		let playerOverlay = document.querySelector('#playerOverlay');
+		if (playerOverlay) {
+			let playerOverlayLink = (
+				<div id="te-player-overlay-prefs">
+					{window.truste?.eu?.bindMap?.icon || 'Cookie Preferences'}
+				</div>
+			);
+			playerOverlayLink.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				window.truste?.eu?.clickListener();
+			});
+			playerOverlay.append(playerOverlayLink);
+		}
+	});
 
 	if (window._CMLS_CMP.oneTrustOptions.reloadAfterConsent) {
 		// Handle reloading the page after user chooses preference
@@ -123,3 +144,32 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		*/
 	}
 })(window.self);
+
+/*
+For websites:
+
+1. Add autoblock, notice, and page reload scripts at the very top of the <HEAD> tag
+
+<script src="https://consent.trustarc.com/v2/autoblockasset/core.min.js?cmId=wvjoxr"></script>
+<script src="https://consent.trustarc.com/v2/autoblock?cmId=wvjoxr"></script>
+<script type="text/javascript" async="async" src="https://consent.trustarc.com/v2/notice/wvjoxr?pcookie"></script>
+<script>
+// Reload page after consent preference is changed.
+document.addEventListener('trustarc-consent-updated', () => setTimeout(() => location.reload(), 300));
+</script>
+
+2. Add the consent banner container in the body.
+
+<div id="consent-banner"></div>
+
+3. Add the Cookie Preferences link where desired
+
+<span id="teconsent"></span>
+
+4. For a custom preferences button:
+
+	a. Fetching the preferences link text:
+		window.truste?.eu?.bindMap?.icon || 'Cookie Preferences'
+	b. Opening the preferences modal:
+		truste && truste.eu.clickListener()
+*/
