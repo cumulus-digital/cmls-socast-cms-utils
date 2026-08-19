@@ -92,9 +92,10 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	domReady(() => {
 		let playerOverlay = document.querySelector('#playerOverlay');
 		if (playerOverlay) {
+			log.debug('Injecting preferences link for player overlay');
 			let playerOverlayLink = (
 				<div id="te-player-overlay-prefs">
-					{window.truste?.eu?.bindMap?.icon || 'Cookie Preferences'}
+					<span>{window.truste?.eu?.bindMap?.icon || 'Cookie Preferences'}</span>
 				</div>
 			);
 			playerOverlayLink.addEventListener('click', (e) => {
