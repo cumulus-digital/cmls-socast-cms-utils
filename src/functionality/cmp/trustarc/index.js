@@ -87,6 +87,11 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 
 	if (window._CMLS_CMP.oneTrustOptions.reloadAfterConsent) {
 		// Handle reloading the page after user chooses preference
+		document.addEventListener('trustarc-consent-updated', () => {
+			log.info('Consent updated, reloading page.');
+			setTimeout(() => location.reload(), 300);
+		});
+		/*
 		window.addEventListener(
 			'message',
 			function (ev) {
@@ -115,5 +120,6 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 				}, 500);
 			}
 		});
+		*/
 	}
 })(window.self);
