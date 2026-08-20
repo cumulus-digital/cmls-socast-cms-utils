@@ -46,20 +46,17 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		if (footerNav) {
 			footerNav.append(
 				<li>
-					<span id="teconsent" class="nav-item-parent hover-effect">
-						{window.truste?.eu?.bindMap?.icon ||
-							'Cookie Preferences'}
-					</span>
+					<span
+						id="teconsent"
+						class="nav-item-parent hover-effect"
+					></span>
 				</li>
 			);
 		} else {
 			document.body.append(
 				<div id="te-footer-msg">
 					<div class="inner">
-						<span id="teconsent">
-							{window.truste?.eu?.bindMap?.icon ||
-								'Cookie Preferences'}
-						</span>
+						<span id="teconsent"></span>
 					</div>
 				</div>
 			);
@@ -95,7 +92,10 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 			log.debug('Injecting preferences link for player overlay');
 			let playerOverlayLink = (
 				<div id="te-player-overlay-prefs">
-					<span>{window.truste?.eu?.bindMap?.icon || 'Cookie Preferences'}</span>
+					<span>
+						{window.truste?.eu?.bindMap?.icon ||
+							'Cookie Preferences'}
+					</span>
 				</div>
 			);
 			playerOverlayLink.addEventListener('click', (e) => {
