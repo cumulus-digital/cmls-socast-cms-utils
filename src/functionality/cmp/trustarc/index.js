@@ -12,6 +12,8 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		return;
 	}
 
+	log.info('Initializing TrustArc alterations.');
+
 	window._CMLS_CMP = window._CMLS_CMP || {};
 	if (typeof window._CMLS_CMP?.oneTrustOptions === 'object') {
 		window._CMLS_CMP.oneTrustOptions = Object.assign(
@@ -22,10 +24,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 		window._CMLS_CMP.oneTrustOptions = config.defaultOptions;
 	}
 
-	log.debug(
-		'Initializing TrustArc customizations.',
-		window._CMLS_CMP.oneTrustOptions
-	);
+	log.debug('CMP Options', window._CMLS_CMP.oneTrustOptions);
 
 	if (!document.getElementById('trustarc-sdk-styles')) {
 		import(

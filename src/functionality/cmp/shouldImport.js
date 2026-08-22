@@ -19,14 +19,14 @@ export default () => {
 			resolve(() => {
 				if (window.OneTrustStub || window?.OneTrust) {
 					log.info('OneTrust CMP detected');
-					import(
+					require(
 						/* webpackPreload: true, webpackChunkName: "functionality/cmp/onetrust" */
 						'./onetrust/index.js'
 					);
 				}
 				if (window.truste) {
 					log.info('TrustArc CMP detected');
-					import(
+					require(
 						/* webpackPreload: true, webpackChunkName: "functionality/cmp/trustarc" */
 						'./trustarc/index.js'
 					);
