@@ -281,7 +281,7 @@ module.exports = (env) => {
 			},
 		},
 		watchOptions: {
-			poll: 1000,
+			poll: 10000,
 		},
 	};
 };

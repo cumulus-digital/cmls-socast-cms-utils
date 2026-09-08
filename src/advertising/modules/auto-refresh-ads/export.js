@@ -15,6 +15,9 @@ const {
 	nameSpace,
 	version,
 	defaultRefreshInMinutes,
+	testForViewability,
+	viewabilityRatio,
+	tickInterval,
 	ALWAYS_REFRESH_POS,
 } = config;
 if (!ALWAYS_REFRESH_POS) {
@@ -57,7 +60,10 @@ window.__CMLSINTERNAL.clearAutoRefreshAdsExclusion = () => {
 };
 
 class AdRefresher {
-	log = log;
+	// Generate a random instance string
+	instance = Math.ceil(Math.random() * 10000);
+
+	log = null;
 
 	// Time in minutes to refresh
 	every = defaultRefreshInMinutes;
@@ -100,7 +106,17 @@ class AdRefresher {
 	// Holds the interval
 	interval = null;
 
+	// Tick logging interval
+	tickLogInterval = 5000;
+
+	// Hold time of last tick log
+	lastTickLogged = null;
+
+	discoveredSlots = new Map();
+
 	constructor(minutes = defaultRefreshInMinutes) {
+		this.log = new Logger(`${scriptName} v${version} [${this.instance}]`);
+
 		if (window?._CMLS?.autoRefreshAdsInterval > 0) {
 			this.every = window._CMLS.autoRefreshAdsInterval;
 		} else {
@@ -114,13 +130,27 @@ class AdRefresher {
 
 		const adTag = window.__CMLSINTERNAL.adTag;
 
-		log.debug(
+		this.log.debug('Gathering existing slots.');
+		adTag.getSlots().forEach((slot) => {
+			// Assume the slot has been requested
+			this.updateLastRequested(slot);
+			// If the slot has been filled, assume it has been viewable
+			if (slot.getResponseInformation()) {
+				this.updateLastViewableImpression(slot);
+			}
+		});
+
+		this.log.debug(
 			'Adding impressionViewable listener. Refresh timer will be set per-slot ' +
 				'once an impression is delivered.'
 		);
 		adTag.addListener(
 			'impressionViewable',
-			this.impressionListener.bind(this)
+			this.viewableImpressionListener.bind(this)
+		);
+		adTag.addListener(
+			'slotRequested',
+			this.slotRequestedListener.bind(this)
 		);
 
 		// Check for always-refresh slots
@@ -133,7 +163,7 @@ class AdRefresher {
 				!this.slotHasRefreshSetKey(slot) &&
 				!this.slotHasTimer(slot)
 			) {
-				log.debug(
+				this.log.debug(
 					`Slot with div id ${slot.getSlotElementId()} will always refresh`,
 					window.__CMLSINTERNAL.adTag.listSlotData(slot)
 				);
@@ -141,9 +171,9 @@ class AdRefresher {
 			}
 		});
 
-		// Check future slots for always refreshers
 		adTag.addListener('slotRenderEnded', (e) => {
 			const slot = e.slot;
+			// Check future slots for always refreshers
 			if (
 				this.slotIsAlwaysRefresh(slot) &&
 				!this.slotHasRefreshSetKey(slot) &&
@@ -155,7 +185,11 @@ class AdRefresher {
 
 		this.interval = setInterval(() => {
 			this.tick.call(this);
-		}, 1000);
+		}, tickInterval);
+		this.log.debug(
+			`Ticks are logged every ${this.tickLogInterval / 1000} seconds, actual tick interval is ${tickInterval / 1000} seconds.`
+		);
+		this.log.info('Auto-Refresh-Ads is running.');
 
 		return this;
 	}
@@ -175,13 +209,13 @@ class AdRefresher {
 		const { DISABLED, PAUSED, RUNNING } = this.globalConditions;
 		const autoReloadPage = window.__CMLSINTERNAL?.autoReload;
 		if (window.DISABLE_AUTO_REFRESH_ADS) {
-			log.warn(
+			this.log.warn(
 				'window.DISABLE_AUTO_REFRESH_ADS is set. Ads will not refresh.'
 			);
 			return DISABLED;
 		}
 		if (window?._CMLS?.autoRefreshAdsInterval === 0) {
-			log.warn(
+			this.log.warn(
 				'Auto refresh ads disabled by window._CMLS.autoRefreshAdsInterval = 0'
 			);
 			return DISABLED;
@@ -190,7 +224,7 @@ class AdRefresher {
 			autoReloadPage?.active &&
 			autoReloadPage.settings.timeout < this.every * 2
 		) {
-			log.warn(
+			this.log.warn(
 				'Auto-Reload-Page timer is less than 2x Auto-Refresh-Ads timer. Ads will not refresh'
 			);
 			return DISABLED;
@@ -199,9 +233,9 @@ class AdRefresher {
 		return RUNNING;
 	}
 
-	impressionListener(e) {
+	viewableImpressionListener(e) {
 		const slot = e.slot;
-		log.debug('Impression viewable', {
+		this.log.debug('Impression viewable', {
 			elementId: slot.getSlotElementId(),
 			pos: slot.getTargeting('pos'),
 			refresh: slot.getTargeting(this.TARGET_REFRESH_KEY),
@@ -212,6 +246,110 @@ class AdRefresher {
 		if (!this.slotHasRefreshSetKey(slot) && !this.slotHasTimer(slot)) {
 			this.setSlotTimer(slot);
 		}
+		this.updateLastViewableImpression(slot);
+	}
+
+	slotRequestedListener(e) {
+		const slot = e.slot;
+		this.log.debug('Slot requested', {
+			elementId: slot.getSlotElementId(),
+			pos: slot.getTargeting('pos'),
+			refresh: slot.getTargeting(this.TARGET_REFRESH_KEY),
+		});
+		this.updateLastRequested(slot);
+	}
+
+	request;
+
+	updateDiscoveredSlotData(slot, data = {}) {
+		if (this.discoveredSlots.has(slot)) {
+			data = { ...this.discoveredSlots.get(slot), ...data };
+		}
+		this.discoveredSlots.set(slot, data);
+	}
+
+	getDiscoveredSlotData(slot) {
+		return this.discoveredSlots.get(slot);
+	}
+
+	updateLastViewableImpression(slot) {
+		this.updateDiscoveredSlotData(slot, { lastViewable: new Date() });
+	}
+
+	updateLastRequested(slot) {
+		this.updateDiscoveredSlotData(slot, { lastRequested: new Date() });
+	}
+
+	updateRequestWasForced(slot) {
+		this.updateDiscoveredSlotData(slot, { requestWasForced: true });
+	}
+
+	isSlotViewable(slot) {
+		if (!slot) return false;
+
+		const id = slot.getSlotElementId();
+		const el = document.getElementById(id);
+
+		if (!el || el.offsetParent === null) return false;
+
+		const rect = el.getBoundingClientRect();
+		const elementWidth = rect.width;
+		const elementHeight = rect.height;
+
+		if (elementWidth === 0 || elementHeight === 0) {
+			return (
+				rect.top < window.innerHeight &&
+				rect.bottom > 0 &&
+				rect.left < window.innerWidth &&
+				rect.right > 0
+			);
+		}
+
+		// Calculate the overlapping dimensions between the slot and the viewport boundaries
+		const overlapWidth = Math.max(
+			0,
+			Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
+		);
+		const overlapHeight = Math.max(
+			0,
+			Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)
+		);
+
+		// Calculate the total area vs visible area
+		const elementArea = elementWidth * elementHeight;
+		const visibleArea = overlapWidth * overlapHeight;
+		const elVisibility = visibleArea / elementArea;
+
+		// Returns true only if 50% or more of the element's area is visible
+		return elVisibility >= viewabilityRatio;
+	}
+
+	wouldSlotBeViewable(slot) {
+		if (!slot) return false;
+
+		const id = slot.getSlotElementId();
+		const el = document.getElementById(id);
+
+		const isDisplayNone = el.style.display === 'none';
+		const isHidden = el.style.visibility === 'hidden';
+
+		if (isDisplayNone) {
+			el.style.display = 'block';
+		}
+		if (isHidden) {
+			el.style.visibility = 'visible';
+		}
+
+		const isVisible = this.isSlotViewable(slot);
+
+		if (isDisplayNone) {
+			el.style.display = 'none';
+		}
+		if (isHidden) {
+			el.style.visibility = 'hidden';
+		}
+
+		return isVisible;
 	}
 
 	/**
@@ -286,7 +424,7 @@ class AdRefresher {
 		return this.timers.has(slot);
 	}
 
-	setSlotTimer(slot) {
+	setSlotTimer(slot, fireTime = null) {
 		const id = slot.getSlotElementId();
 		const pos = slot.getTargeting('pos');
 		const now = new Date();
@@ -294,12 +432,14 @@ class AdRefresher {
 		now.setSeconds(
 			now.getSeconds() + Math.max(now.getMilliseconds() / 1000)
 		);
-		const fireTime = new Date(now.getTime() + this.every * 60000);
-		log.debug(
-			`Setting ${this.every} minute refresh timer on slot.`,
-			{ pos, id },
-			fireTime.toLocaleString()
-		);
+		if (fireTime === null) {
+			fireTime = new Date(now.getTime() + this.every * 60000);
+			this.log.debug(
+				`Setting ${this.every} minute refresh timer on slot.`,
+				{ pos, id },
+				fireTime.toLocaleString()
+			);
+		}
 
 		this.deleteSlotTimer(slot);
 		this.timers.set(slot, fireTime);
@@ -327,8 +467,17 @@ class AdRefresher {
 
 	tick() {
 		const now = new Date();
-		if (now.getTime() % ((this.every * 60000) / 4) < 1000) {
-			log.debug('Tick', now.toLocaleString());
+		if (!this.lastTickLogged) this.lastTickLogged = now;
+		let logTick = false;
+
+		// Log tick every 5 seconds
+		if (
+			now.getTime() >
+			this.lastTickLogged.getTime() + this.tickLogInterval
+		) {
+			logTick = true;
+			this.log.debug('Tick', now.toLocaleString(), this.instance);
+			this.lastTickLogged = now;
 		}
 
 		const refreshSlots = [];
@@ -341,18 +490,56 @@ class AdRefresher {
 			if (now >= fireTime) {
 				const id = slot.getSlotElementId();
 				const pos = slot.getTargeting('pos');
-				log.debug('Queueing for refresh', { pos, id });
-				this.deleteSlotTimer(slot);
-				refreshSlots.push(slot);
-				slotData.push(window.__CMLSINTERNAL.adTag.listSlotData(slot));
+				const isInViewport = this.isSlotViewable(slot);
+				if (testForViewability && !isInViewport) {
+					if (logTick) {
+						this.log.debug('Not in viewport', { pos, id });
+					}
+					this.setSlotTimer(
+						slot,
+						new Date(fireTime.getTime() + 1000)
+					);
+				} else {
+					this.log.debug('Queueing for refresh', { pos, id });
+					this.deleteSlotTimer(slot);
+					refreshSlots.push(slot);
+					slotData.push(
+						window.__CMLSINTERNAL.adTag.listSlotData(slot)
+					);
+				}
 			}
 		});
+
 		if (refreshSlots.length) {
-			log.info(
+			this.log.info(
 				`${new Date().toLocaleString()} Refreshing ${refreshSlots.length} slots`,
 				slotData
 			);
 			window.__CMLSINTERNAL.adTag.refresh(refreshSlots);
+		}
+
+		// Check slots which haven't delivered yet
+		const forceLaggingSlots = [];
+		this.discoveredSlots.forEach((data, slot) => {
+			const id = slot.getSlotElementId();
+			if (data.lastRequested && !data.lastViewable) {
+				if (
+					now.getTime() >=
+					data.lastRequested.getTime() + this.every * 60000
+				) {
+					if (this.wouldSlotBeViewable(slot)) {
+						this.log.debug('Slot would be viewable', { id });
+						forceLaggingSlots.push(slot);
+					}
+				}
+			}
+		});
+		if (forceLaggingSlots.length) {
+			this.log.warn('Forcing lagging slots', forceLaggingSlots);
+			forceLaggingSlots.forEach(slot => {
+				this.updateLastRequested(slot);
+			});
+			window.__CMLSINTERNAL.adTag.refresh(forceLaggingSlots);
 		}
 	}
 

@@ -1,9 +1,14 @@
 {
 	"scriptName": "AUTO REFRESH ADS",
 	"nameSpace": "autoRefreshAds",
-	"version": "0.6",
+	"version": "0.7",
 
 	"defaultRefreshInMinutes": 1,
+
+	"testForViewability": true,
+	"viewabilityRatio": 0.5,
+
+	"tickInterval": 1000,
 
 	"refreshKey": "refresh",
 	"refreshAlwaysKey": "always_refresh",
