@@ -519,6 +519,7 @@ class AdRefresher {
 		}
 
 		// Check slots which haven't delivered yet
+		/*
 		const forceLaggingSlots = [];
 		this.discoveredSlots.forEach((data, slot) => {
 			const id = slot.getSlotElementId();
@@ -547,6 +548,7 @@ class AdRefresher {
 			});
 			window.__CMLSINTERNAL.adTag.refresh(forceLaggingSlots);
 		}
+		*/
 	}
 
 	destroy() {
