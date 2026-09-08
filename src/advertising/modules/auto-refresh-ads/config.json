@@ -17,5 +17,7 @@
 	"refreshNotAllowedValue": "false",
 	"refreshSetValue": "set",
 
-	"ALWAYS_REFRESH_POS": []
+	"ALWAYS_REFRESH_POS": [],
+
+	"excludeFromForcedRefresh": ["gpt-wallpaper-slot"]
 }

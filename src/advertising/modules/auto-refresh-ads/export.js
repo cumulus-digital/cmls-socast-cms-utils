@@ -522,6 +522,7 @@ class AdRefresher {
 		const forceLaggingSlots = [];
 		this.discoveredSlots.forEach((data, slot) => {
 			const id = slot.getSlotElementId();
+			if (config.excludeFromForcedRefresh.includes(id)) return;
 			if (data.lastRequested && !data.lastViewable) {
 				if (
 					now.getTime() >=
@@ -536,6 +537,8 @@ class AdRefresher {
 		});
 		if (forceLaggingSlots.length) {
 			forceLaggingSlots.forEach((slot) => {
+				const id = slot.getSlotElementId();
+				if (config.excludeFromForcedRefresh.includes(id)) return;
 				this.log.warn(
 					'Forcing lagging slot',
 					window.__CMLSINTERNAL.adTag.listSlotData(slot)
