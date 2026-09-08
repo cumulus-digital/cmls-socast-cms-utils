@@ -535,8 +535,11 @@ class AdRefresher {
 			}
 		});
 		if (forceLaggingSlots.length) {
-			this.log.warn('Forcing lagging slots', forceLaggingSlots);
-			forceLaggingSlots.forEach(slot => {
+			forceLaggingSlots.forEach((slot) => {
+				this.log.warn(
+					'Forcing lagging slot',
+					window.__CMLSINTERNAL.adTag.listSlotData(slot)
+				);
 				this.updateLastRequested(slot);
 			});
 			window.__CMLSINTERNAL.adTag.refresh(forceLaggingSlots);
