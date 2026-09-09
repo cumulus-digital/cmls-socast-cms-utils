@@ -8,7 +8,7 @@
 	"testForViewability": true,
 	"viewabilityRatio": 0.5,
 
-	"tickInterval": 1000,
+	"tickInterval": 2000,
 
 	"refreshKey": "refresh",
 	"refreshAlwaysKey": "always_refresh",

@@ -6,7 +6,7 @@
  * @returns {boolean}
  */
 export function isTruthy(value) {
-	for (let test in ['true', 'yes', '1']) {
+	for (let test of ['true', 'yes', '1']) {
 		if (test === String(value).toLowerCase()) {
 			return true;
 		}
@@ -22,7 +22,7 @@ export function isTruthy(value) {
  * @returns {boolean}
  */
 export function isFalsy(value) {
-	for (let test in ['false', 'no', '0']) {
+	for (let test of ['false', 'no', '0']) {
 		if (test === String(value).toLowerCase()) {
 			return true;
 		}

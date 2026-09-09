@@ -1,6 +1,9 @@
 /**
  * Auto-refresh ads.
  *
+ * Auto-refresh ads on a per-slot basis. Also refreshes slots which
+ * did not deliver an impression.
+ *
  * Each slot has its own refresh fire time, set if one or both of
  * the following conditions are met:
  * 1) impressionViewable event has previously fired on the slot
@@ -8,7 +11,7 @@
  */
 
 import config from './config.json';
-import { isTruthy, includesTruthy, includesFalsy } from 'Utils/truth';
+import { includesTruthy, includesFalsy } from 'Utils/truth';
 
 const {
 	scriptName,
@@ -18,17 +21,25 @@ const {
 	testForViewability,
 	viewabilityRatio,
 	tickInterval,
-	ALWAYS_REFRESH_POS,
+	excludeFromForcedRefresh,
 } = config;
-if (!ALWAYS_REFRESH_POS) {
-	ALWAYS_REFRESH_POS = [];
+let ALWAYS_REFRESH_POS = [];
+if (config.ALWAYS_REFRESH_POS) {
+	ALWAYS_REFRESH_POS = config.ALWAYS_REFRESH_POS;
 }
+
 const { Logger } = window.__CMLSINTERNAL.libs;
 const log = new Logger(`${scriptName} ${version}`);
 
-// Public access exclusion from refresh
-if (!window.__CMLSINTERNAL?.initAutoRefreshAdsExclusion) {
+/**
+ * Public access exclusion from refresh
+ *
+ * Allows adding a div IDs to an exclusion list. Those divs will not
+ * be refreshed.
+ */
+if (!window.__CMLSINTERNAL.initAutoRefreshAdsExclusion) {
 	window.__CMLSINTERNAL.initAutoRefreshAdsExclusion = () => {
+		window._CMLS = window._CMLS || {};
 		window._CMLS.autoRefreshAdsExclusion =
 			window._CMLS?.autoRefreshAdsExclusion || [];
 
@@ -59,167 +70,456 @@ window.__CMLSINTERNAL.clearAutoRefreshAdsExclusion = () => {
 	window.__CMLSINTERNAL.initAutoRefreshAdsExclusion();
 };
 
+class SlotData {
+	adRefresher = null;
+	slot = null;
+
+	_lastRequest = null;
+
+	_lastResponse = null;
+
+	_lastRendered = null;
+
+	_lastViewableImpression = null;
+
+	_viewable = null;
+
+	nextRefresh = null;
+
+	_alwaysRefresh = null;
+	_neverRefresh = null;
+
+	empty = true;
+
+	constructor(adRefresher, slot) {
+		if (!adRefresher) {
+			throw new Error('SlotData must be constructed with an AdRefresher');
+		}
+		this.adRefresher = adRefresher;
+
+		if (!SlotData.isGoogleSlot(slot)) {
+			throw new Error(
+				'SlotData must be constructed from a googletag.Slot'
+			);
+		}
+		this.slot = slot;
+	}
+
+	get id() {
+		return SlotData.generateDataId(this.slot);
+	}
+
+	get summary() {
+		return {
+			elementId: this.slot.getSlotElementId(),
+			pos: this.slot.getTargeting('pos'),
+			refresh: this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY),
+			empty: this.empty,
+			viewable: this.viewable,
+			lastRequest: this.lastRequest,
+			lastResponse: this.lastResponse,
+			lastRendered: this.lastRendered,
+			lastViewableImpression: this.lastViewableImpression,
+			nextRefresh: this.nextRefresh,
+		};
+	}
+
+	get alwaysRefresh() {
+		const pos = this.slot.getTargeting('pos');
+		const targetedAlways = includesTruthy(
+			this.slot.getTargeting(AdRefresher.TARGET_ALWAYS_REFRESH_KEY)
+		);
+		if (targetedAlways) {
+			this._alwaysRefresh = true;
+			return true;
+		}
+		this._alwaysRefresh = ALWAYS_REFRESH_POS.some((check) =>
+			pos.includes(check)
+		)
+			? true
+			: false;
+		return this._alwaysRefresh;
+	}
+
+	get neverRefresh() {
+		const alreadyKnown = this._neverRefresh === true;
+		const id = this.slot.getSlotElementId();
+
+		// Check if excluded
+		if (window._CMLS?.autoRefreshAdsExclusion?.includes(id)) {
+			if (!alreadyKnown) {
+				this.adRefresher.log.debug(
+					'Slot excluded from refresh by public exclusion',
+					this.summary
+				);
+			}
+			this._neverRefresh = true;
+			return true;
+		}
+
+		const t = this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY);
+		if (
+			includesFalsy(t) ||
+			includesTruthy(
+				this.slot.getTargeting(AdRefresher.TARGET_NEVER_REFRESH_KEY)
+			) ||
+			t.includes(AdRefresher.TARGET_NEVER_REFRESH_KEY)
+		) {
+			if (!alreadyKnown) {
+				this.adRefresher.log.debug(
+					'Slot excluded from refresh by targeting',
+					this.summary
+				);
+			}
+			this._neverRefresh = true;
+			return true;
+		}
+
+		this._neverRefresh = false;
+		return false;
+	}
+
+	get viewable() {
+		if (this._viewable === null) {
+			this._viewable = SlotData.testViewability(this.slot);
+		}
+		return this._viewable;
+	}
+	set viewable(val = false) {
+		this._viewable = !!val;
+	}
+
+	get lastRequest() {
+		return this._lastRequest;
+	}
+	set lastRequest(val = null) {
+		if (!val) {
+			val = new Date();
+		}
+		this._lastRequest = val;
+	}
+
+	get lastResponse() {
+		return this._lastResponse;
+	}
+	set lastResponse(val = null) {
+		this._lastResponse = val;
+	}
+
+	get lastRendered() {
+		return this._lastRendered;
+	}
+	set lastRendered(val = null) {
+		if (!val) {
+			val = new Date();
+		}
+		this._lastRendered = val;
+	}
+
+	get lastViewableImpression() {
+		return this._lastViewableImpression;
+	}
+	set lastViewableImpression(val = null) {
+		if (!val) {
+			val = new Date();
+		}
+		this._lastViewableImpression = val;
+	}
+
+	get refreshKey() {
+		return this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY);
+	}
+	set refreshKey(val = null) {
+		this.slot.setConfig({
+			targeting: {
+				[AdRefresher.TARGET_REFRESH_KEY]: val,
+			},
+		});
+	}
+
+	static isGoogleSlot(slot) {
+		return (
+			slot &&
+			typeof slot === 'object' &&
+			typeof slot.getAdUnitPath === 'function' &&
+			typeof slot.getSlotElementId === 'function'
+		);
+	}
+
+	static generateDataId(slot = null) {
+		if (!SlotData.isGoogleSlot(slot)) {
+			throw new Error('generateDataId must be passed a googletag.Slot');
+		}
+		return `${slot.getSlotElementId()}__${slot.getAdUnitPath()}`;
+	}
+	generateDataId() {
+		return SlotData.generateDataId(this.slot);
+	}
+
+	/**
+	 * Checks if a provided slot is within the viewport by at
+	 * least `config.viewabilityRatio`
+	 *
+	 * @param slot googletag.Slot
+	 * @param reveal Force element to be visible before testing
+	 * @returns {boolean}
+	 */
+	static testViewability(slot = null, reveal = false) {
+		if (!SlotData.isGoogleSlot(slot)) {
+			throw new Error(
+				'SlotData.testViewability must be passed a googletag.Slot'
+			);
+		}
+
+		const id = slot.getSlotElementId();
+		const el = document.getElementById(id);
+
+		if (!el) {
+			return false;
+		}
+
+		const cachedDisplay = el.style.display;
+		const cachedVisibility = el.style.visibility;
+		const isDisplayNone = cachedDisplay === 'none';
+		const isHidden = cachedVisibility === 'hidden';
+
+		try {
+			if (reveal === true) {
+				if (isDisplayNone) {
+					el.style.display = 'block';
+				}
+				if (isHidden) {
+					el.style.visibility = 'visible';
+				}
+			}
+
+			if (
+				typeof el.checkVisibility === 'function' &&
+				!el.checkVisibility()
+			) {
+				return false;
+			}
+
+			const rect = el.getBoundingClientRect();
+			const elementWidth = rect.width;
+			const elementHeight = rect.height;
+
+			if (elementWidth === 0 || elementHeight === 0) {
+				return (
+					rect.top < window.innerHeight &&
+					rect.bottom > 0 &&
+					rect.left < window.innerWidth &&
+					rect.right > 0
+				);
+			}
+
+			// Calculate the overlapping dimensions between the slot and the viewport boundaries
+			const overlapWidth = Math.max(
+				0,
+				Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
+			);
+			const overlapHeight = Math.max(
+				0,
+				Math.min(rect.bottom, window.innerHeight) -
+					Math.max(rect.top, 0)
+			);
+
+			// Calculate the total area vs visible area
+			const elementArea = elementWidth * elementHeight;
+			const visibleArea = overlapWidth * overlapHeight;
+			const elVisibility = visibleArea / elementArea;
+
+			// Returns true only if 50% or more of the element's area is visible
+			const isVisible = elVisibility >= viewabilityRatio;
+
+			return isVisible;
+		} finally {
+			if (reveal === true) {
+				el.style.display = cachedDisplay;
+				el.style.visibility = cachedVisibility;
+			}
+		}
+	}
+	testViewability(reveal = false) {
+		return SlotData.testViewability(this.slot, reveal);
+	}
+
+	canRefresh() {
+		if (this.neverRefresh) {
+			this.nextRefresh = null;
+			return false;
+		}
+
+		if (this.alwaysRefresh) {
+			return true;
+		}
+
+		if (testForViewability && !this.viewable) {
+			/*
+			this.adRefresher.log.debug(
+				'SlotData.canRefresh: Slot is not viewable',
+				this.summary
+			);
+			*/
+			return false;
+		} else {
+			/*
+			this.adRefresher.log.debug(
+				'SlotData.canRefresh: Slot is viewable',
+				this.summary
+			);
+			*/
+			return true;
+		}
+	}
+}
+
 class AdRefresher {
 	// Generate a random instance string
 	instance = Math.ceil(Math.random() * 10000);
 
-	log = null;
+	log = new Logger(`${scriptName} ${version} [${this.instance}]`);
 
-	// Time in minutes to refresh
-	every = defaultRefreshInMinutes;
+	every = defaultRefreshInMinutes * 60000;
 
-	// Global state conditions
-	globalConditions = {
-		DISABLED: 'Auto-Refresh-Ads is disabled.',
-		PAUSED: 'Auto-Refresh-Ads is paused.',
-		RUNNING: 'Auto-Refresh-Ads is running.',
+	// Global state of the ad refresher
+	globalStates = {
+		DESTROYED: 'This Auto-Refresh-Ads instance has been destroyed',
+		DISABLED: 'Auto-Refresh-Ads is disabled',
+		PAUSED: 'Auto-Refresh-Ads is paused',
+		RUNNING: 'Auto-Refresh-Ads is running',
 	};
 
-	// Slot conditions
-	slotConditions = {
-		OK: 'Slot is good to refresh.',
-		NEVER: 'Slot is set to never refresh.',
-		TARGET_NEVER: `Slot has ${this.TARGET_NEVER_REFRESH_KEY} targeting.`,
-		ALWAYS: 'Slot is set to always refresh.',
-		TARGET_ALWAYS: `Slot has ${this.TARGET_ALWAYS_REFRESH_KEY} targeting.`,
-		EXCLUDED: 'Slot is excluded by autoRefreshAdsExclusion.',
-		DISABLED: 'Refresh is disabled for this slot.',
-		HIDDEN: 'Slot is not currently viewable.',
-	};
+	state = null;
 
 	// Targeting key set for slots which should refresh on the next cycle
-	TARGET_REFRESH_KEY = config.refreshKey;
+	static TARGET_REFRESH_KEY = config.refreshKey;
 
 	// Targeting key set for slots which ALWAYS refresh
-	TARGET_ALWAYS_REFRESH_KEY = config.refreshAlwaysKey;
+	static TARGET_ALWAYS_REFRESH_KEY = config.refreshAlwaysKey;
 
 	// Targeting key set for slots which NEVER refresh
-	TARGET_NEVER_REFRESH_KEY = config.refreshNeverKey;
+	static TARGET_NEVER_REFRESH_KEY = config.refreshNeverKey;
 
-	TARGET_TRUE = config.refreshAllowedValue;
-	TARGET_FALSE = config.refreshNotAllowedValue;
-	TARGET_SET = config.refreshSetValue;
+	static TARGET_TRUE = config.refreshAllowedValue;
+	static TARGET_FALSE = config.refreshNotAllowedValue;
+	static TARGET_SET = config.refreshSetValue;
 
-	// Holds timers for slots
-	timers = new Map();
+	// Holds data on all discovered slots
+	slots = new Map();
 
-	// Holds the interval
+	// Holds our tick interval
 	interval = null;
 
-	// Tick logging interval
+	// How often to log ticks, in milliseconds
 	tickLogInterval = 5000;
 
-	// Hold time of last tick log
+	// Holds time of last tick log
 	lastTickLogged = null;
 
-	discoveredSlots = new Map();
+	boundListeners = {};
 
-	constructor(minutes = defaultRefreshInMinutes) {
-		this.log = new Logger(`${scriptName} v${version} [${this.instance}]`);
-
+	constructor(milliseconds = defaultRefreshInMinutes * 60000) {
+		// Allows a global override of the refresh time
 		if (window?._CMLS?.autoRefreshAdsInterval > 0) {
-			this.every = window._CMLS.autoRefreshAdsInterval;
+			this.every = window._CMLS.autoRefreshAdsInterval * 60000;
 		} else {
-			this.every = minutes;
+			this.every = milliseconds;
 		}
 
-		if (this.checkGlobalConditions() !== this.globalConditions.RUNNING) {
-			log.info('Global condition check failed, will not refresh ads.');
-			return false;
+		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
+			log.info(
+				'Global condition check failed, will not refresh ads.',
+				this.state
+			);
+			return;
 		}
 
 		const adTag = window.__CMLSINTERNAL.adTag;
 
+		// Get the existing slots
 		this.log.debug('Gathering existing slots.');
 		adTag.getSlots().forEach((slot) => {
-			// Assume the slot has been requested
-			this.updateLastRequested(slot);
+			let slotData = this.setSlotData(slot);
+
+			slotData.lastRequest = new Date();
+
 			// If the slot has been filled, assume it has been viewable
 			if (slot.getResponseInformation()) {
-				this.updateLastViewableImpression(slot);
+				slotData.lastViewableImpression = new Date();
+				slotData.empty = false;
 			}
-		});
 
-		this.log.debug(
-			'Adding impressionViewable listener. Refresh timer will be set per-slot ' +
-				'once an impression is delivered.'
-		);
-		adTag.addListener(
-			'impressionViewable',
-			this.viewableImpressionListener.bind(this)
-		);
-		adTag.addListener(
-			'slotRequested',
-			this.slotRequestedListener.bind(this)
-		);
-
-		// Check for always-refresh slots
-		adTag.getSlots().forEach((slot) => {
-			if (this.slotIsExcluded(slot)) {
-				return;
-			}
-			if (
-				this.slotIsAlwaysRefresh(slot) &&
-				!this.slotHasRefreshSetKey(slot) &&
-				!this.slotHasTimer(slot)
-			) {
+			// Check for always-refresh slots and set their timer immediately
+			if (slotData.alwaysRefresh) {
 				this.log.debug(
-					`Slot with div id ${slot.getSlotElementId()} will always refresh`,
-					window.__CMLSINTERNAL.adTag.listSlotData(slot)
+					`Slot ${slot.getSlotElementId()} is set to always refresh. Setting timer immediately`,
+					slotData.summary
 				);
 				this.setSlotTimer(slot);
 			}
 		});
 
-		adTag.addListener('slotRenderEnded', (e) => {
-			const slot = e.slot;
-			// Check future slots for always refreshers
-			if (
-				this.slotIsAlwaysRefresh(slot) &&
-				!this.slotHasRefreshSetKey(slot) &&
-				!this.slotHasTimer(slot)
-			) {
-				this.setSlotTimer(slot);
-			}
-		});
-
-		this.interval = setInterval(() => {
-			this.tick.call(this);
-		}, tickInterval);
-		this.log.debug(
-			`Ticks are logged every ${this.tickLogInterval / 1000} seconds, actual tick interval is ${tickInterval / 1000} seconds.`
+		this.log.debug('Setting up listeners...');
+		this.boundListeners = {
+			slotRequested: this.listenForSlotRequested.bind(this),
+			impressionViewable: this.listenForViewableImpressions.bind(this),
+			slotRenderEnded: this.listenForSlotRenderEnded.bind(this),
+			slotVisibilityChanged: this.listenForSlotViewable.bind(this),
+		};
+		Object.entries(this.boundListeners).forEach(([e, fn]) =>
+			adTag.addListener(e, fn)
 		);
+
+		this.initInterval();
+
 		this.log.info('Auto-Refresh-Ads is running.');
 
 		return this;
 	}
 
-	isTruthy(value) {
-		return isTruthy(value);
+	clearInterval() {
+		if (this.interval) {
+			clearInterval(this.interval);
+			this.interval = null;
+		}
 	}
 
-	includesTruthy(arr) {
-		return includesTruthy(arr);
+	initInterval() {
+		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
+			return;
+		}
+		this.clearInterval();
+		this.interval = setInterval(this.tick.bind(this), tickInterval);
+		this.log.debug(
+			`Ticks are logged every ${this.tickLogInterval / 1000}s to reduce log noise, actual tick interval is ${tickInterval / 1000}s.`
+		);
 	}
 
 	/**
 	 * Checks the state of the page and browser to determine if ads should refresh
+	 * @returns {string} matching this.globalStates
 	 */
 	checkGlobalConditions() {
-		const { DISABLED, PAUSED, RUNNING } = this.globalConditions;
+		const { DISABLED, PAUSED, RUNNING } = this.globalStates;
 		const autoReloadPage = window.__CMLSINTERNAL?.autoReload;
+
 		if (window.DISABLE_AUTO_REFRESH_ADS) {
 			this.log.warn(
 				'window.DISABLE_AUTO_REFRESH_ADS is set. Ads will not refresh.'
 			);
+			this.state = DISABLED;
 			return DISABLED;
 		}
-		if (window?._CMLS?.autoRefreshAdsInterval === 0) {
+
+		if (window._CMLS?.autoRefreshAdsInterval === 0) {
 			this.log.warn(
 				'Auto refresh ads disabled by window._CMLS.autoRefreshAdsInterval = 0'
 			);
+			this.state = DISABLED;
 			return DISABLED;
 		}
+
 		if (
 			autoReloadPage?.active &&
 			autoReloadPage.settings.timeout < this.every * 2
@@ -227,342 +527,319 @@ class AdRefresher {
 			this.log.warn(
 				'Auto-Reload-Page timer is less than 2x Auto-Refresh-Ads timer. Ads will not refresh'
 			);
+			this.state = DISABLED;
 			return DISABLED;
 		}
 
+		if (this.state === PAUSED) {
+			return PAUSED;
+		}
+
+		this.state = RUNNING;
 		return RUNNING;
 	}
 
-	viewableImpressionListener(e) {
+	getSlotData(slot) {
+		if (!SlotData.isGoogleSlot(slot)) {
+			throw new Error('getSlotData must be passed a googletag.Slot');
+		}
+		return this.slots.get(SlotData.generateDataId(slot));
+	}
+
+	setSlotData(slot, newData = {}) {
+		if (!SlotData.isGoogleSlot(slot)) {
+			throw new Error('setSlotData must be passed a googletag.Slot');
+		}
+		let newSlot = this.getSlotData(slot);
+		if (!newSlot) {
+			this.log.debug(
+				`Creating slot data for ${SlotData.generateDataId(slot)}`,
+				newData
+			);
+			newSlot = new SlotData(this, slot);
+		} else {
+			this.log.debug(`Setting slot data for ${newSlot.id}`, newData);
+		}
+		Object.assign(newSlot, newData);
+		this.slots.set(newSlot.id, newSlot);
+		return this.getSlotData(slot);
+	}
+
+	listenForSlotRequested(e) {
 		const slot = e.slot;
-		this.log.debug('Impression viewable', {
-			elementId: slot.getSlotElementId(),
-			pos: slot.getTargeting('pos'),
-			refresh: slot.getTargeting(this.TARGET_REFRESH_KEY),
-		});
-		if (this.slotIsExcluded(slot)) {
+		let slotData = this.setSlotData(slot);
+		slotData.lastRequest = new Date();
+		this.log.debug('Slot requested', slotData.summary);
+	}
+
+	listenForViewableImpressions(e) {
+		const slot = e.slot;
+		let slotData = this.setSlotData(slot);
+		this.log.debug('Impression viewable', slotData.summary);
+		slotData.lastViewableImpression = new Date();
+		if (!slotData.lastRequest) {
+			slotData.lastRequest = new Date();
+		}
+		if (slotData.neverRefresh) {
 			return;
 		}
-		if (!this.slotHasRefreshSetKey(slot) && !this.slotHasTimer(slot)) {
+		if (!slotData.nextRefresh) this.setSlotTimer(slot);
+	}
+
+	listenForSlotRenderEnded(e) {
+		const slot = e.slot;
+		let slotData = this.getSlotData(slot);
+		if (!slotData) {
+			slotData = this.setSlotData(slot, { lastRequest: new Date() });
+		}
+		slotData.lastRendered = new Date();
+		if (e.isEmpty) {
+			slotData.empty = true;
+		} else {
+			slotData.empty = false;
+		}
+		if (slotData.canRefresh() && !slotData.nextRefresh) {
 			this.setSlotTimer(slot);
 		}
-		this.updateLastViewableImpression(slot);
+		this.log.debug('Slot rendered', slotData.summary);
 	}
 
-	slotRequestedListener(e) {
+	listenForSlotViewable(e) {
 		const slot = e.slot;
-		this.log.debug('Slot requested', {
-			elementId: slot.getSlotElementId(),
-			pos: slot.getTargeting('pos'),
-			refresh: slot.getTargeting(this.TARGET_REFRESH_KEY),
-		});
-		this.updateLastRequested(slot);
-	}
-
-	request;
-
-	updateDiscoveredSlotData(slot, data = {}) {
-		if (this.discoveredSlots.has(slot)) {
-			data = { ...this.discoveredSlots.get(slot), ...data };
+		let slotData = this.getSlotData(slot);
+		if (!slotData) {
+			slotData = this.setSlotData(slot, { lastRequest: new Date() });
 		}
-		this.discoveredSlots.set(slot, data);
-	}
-
-	getDiscoveredSlotData(slot) {
-		return this.discoveredSlots.get(slot);
-	}
-
-	updateLastViewableImpression(slot) {
-		this.updateDiscoveredSlotData(slot, { lastViewable: new Date() });
-	}
-
-	updateLastRequested(slot) {
-		this.updateDiscoveredSlotData(slot, { lastRequested: new Date() });
-	}
-
-	updateRequestWasForced(slot) {
-		this.updateDiscoveredSlotData(slot, { requestWasForced: true });
-	}
-
-	isSlotViewable(slot) {
-		if (!slot) return false;
-
-		const id = slot.getSlotElementId();
-		const el = document.getElementById(id);
-
-		if (!el || el.offsetParent === null) return false;
-
-		const rect = el.getBoundingClientRect();
-		const elementWidth = rect.width;
-		const elementHeight = rect.height;
-
-		if (elementWidth === 0 || elementHeight === 0) {
-			return (
-				rect.top < window.innerHeight &&
-				rect.bottom > 0 &&
-				rect.left < window.innerWidth &&
-				rect.right > 0
-			);
+		const viewable = e.inViewPercentage;
+		if (viewable >= viewabilityRatio * 100) {
+			slotData.viewable = true;
+		} else {
+			slotData.viewable = false;
 		}
-
-		// Calculate the overlapping dimensions between the slot and the viewport boundaries
-		const overlapWidth = Math.max(
-			0,
-			Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
-		);
-		const overlapHeight = Math.max(
-			0,
-			Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)
-		);
-
-		// Calculate the total area vs visible area
-		const elementArea = elementWidth * elementHeight;
-		const visibleArea = overlapWidth * overlapHeight;
-		const elVisibility = visibleArea / elementArea;
-
-		// Returns true only if 50% or more of the element's area is visible
-		return elVisibility >= viewabilityRatio;
-	}
-
-	wouldSlotBeViewable(slot) {
-		if (!slot) return false;
-
-		const id = slot.getSlotElementId();
-		const el = document.getElementById(id);
-
-		const isDisplayNone = el.style.display === 'none';
-		const isHidden = el.style.visibility === 'hidden';
-
-		if (isDisplayNone) {
-			el.style.display = 'block';
-		}
-		if (isHidden) {
-			el.style.visibility = 'visible';
-		}
-
-		const isVisible = this.isSlotViewable(slot);
-
-		if (isDisplayNone) {
-			el.style.display = 'none';
-		}
-		if (isHidden) {
-			el.style.visibility = 'hidden';
-		}
-
-		return isVisible;
-	}
-
-	/**
-	 * Check if slot has the refresh allowed key
-	 * @returns {boolean}
-	 */
-	slotHasRefreshKey(slot) {
-		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
-		return includesTruthy(t);
-	}
-
-	/**
-	 * Check if slot has the refresh set key
-	 * @returns {boolean}
-	 */
-	slotHasRefreshSetKey(slot) {
-		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
-		return includesTruthy(t);
-	}
-
-	/**
-	 * Check if slot should always refresh
-	 * @returns {boolean}
-	 */
-	slotIsAlwaysRefresh(slot) {
-		const { ALWAYS, TARGET_ALWAYS } = this.slotConditions;
-		const pos = slot.getTargeting('pos');
-		const targetedAlways = includesTruthy(
-			slot.getTargeting(this.TARGET_ALWAYS_REFRESH_KEY)
-		);
-		if (targetedAlways) {
-			return TARGET_ALWAYS;
-		}
-		return ALWAYS_REFRESH_POS.some((check) => pos.includes(check))
-			? ALWAYS
-			: false;
-	}
-
-	/**
-	 * Check if slot is excluded from auto-refresh
-	 * @returns {boolean}
-	 */
-	slotIsExcluded(slot) {
-		if (typeof window._CMLS.autoRefreshAdsExclusion === 'undefined') {
-			window.__CMLSINTERNAL?.initAutoRefreshAdsExclusion();
-		}
-
-		const id = slot.getSlotElementId();
-		if (window._CMLS.autoRefreshAdsExclusion.includes(id)) {
-			return this.slotConditions.EXCLUDED;
-		}
-
-		const t = slot.getTargeting(this.TARGET_REFRESH_KEY);
-		if (
-			includesFalsy(t) ||
-			includesTruthy(slot.getTargeting(this.TARGET_NEVER_REFRESH_KEY)) ||
-			slot
-				.getTargeting(this.TARGET_REFRESH_KEY)
-				.includes(this.TARGET_NEVER_REFRESH_KEY)
-		) {
-			return this.slotConditions.EXCLUDED;
-		}
-
-		return false;
-	}
-
-	/**
-	 * Check if a timer is already set for slot
-	 * @returns {boolean}
-	 */
-	slotHasTimer(slot) {
-		return this.timers.has(slot);
 	}
 
 	setSlotTimer(slot, fireTime = null) {
-		const id = slot.getSlotElementId();
-		const pos = slot.getTargeting('pos');
+		const slotData = this.getSlotData(slot);
+
 		const now = new Date();
+
 		// Round timer to seconds
 		now.setSeconds(
-			now.getSeconds() + Math.max(now.getMilliseconds() / 1000)
+			now.getSeconds() + Math.ceil(now.getMilliseconds() / 1000)
 		);
+		now.setMilliseconds(0);
+
 		if (fireTime === null) {
-			fireTime = new Date(now.getTime() + this.every * 60000);
-			this.log.debug(
-				`Setting ${this.every} minute refresh timer on slot.`,
-				{ pos, id },
-				fireTime.toLocaleString()
-			);
+			fireTime = new Date(now.getTime() + this.every);
 		}
 
-		this.deleteSlotTimer(slot);
-		this.timers.set(slot, fireTime);
-		//slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_SET);
-		slot.setConfig({
-			targeting: { [this.TARGET_REFRESH_KEY]: this.TARGET_SET },
-		});
+		slotData.refreshKey = AdRefresher.TARGET_SET;
+		slotData.nextRefresh = fireTime;
 	}
 
 	deleteSlotTimer(slot) {
-		if (this.timers.has(slot)) {
-			clearTimeout(this.timers.get(slot));
-			this.timers.delete(slot);
-			if (
-				this.slotHasRefreshSetKey(slot) ||
-				this.slotHasRefreshKey(slot)
-			) {
-				//slot.setTargeting(this.TARGET_REFRESH_KEY, this.TARGET_TRUE);
-				slot.setConfig({
-					targeting: { [this.TARGET_REFRESH_KEY]: this.TARGET_TRUE },
-				});
-			}
+		const slotData = this.getSlotData(slot);
+		slotData.nextRefresh = null;
+		const currentRefreshKey = slotData.refreshKey;
+		if (
+			currentRefreshKey.includes(AdRefresher.TARGET_SET) ||
+			currentRefreshKey.includes(AdRefresher.TARGET_TRUE)
+		) {
+			slotData.refreshKey = AdRefresher.TARGET_TRUE;
 		}
 	}
 
-	tick() {
-		const now = new Date();
-		if (!this.lastTickLogged) this.lastTickLogged = now;
-		let logTick = false;
+	tickShouldLog(now = new Date()) {
+		if (!this.lastTickLogged) return true;
+		return (
+			now.getTime() > this.lastTickLogged.getTime() + this.tickLogInterval
+		);
+	}
 
-		// Log tick every 5 seconds
-		if (
-			now.getTime() >
-			this.lastTickLogged.getTime() + this.tickLogInterval
-		) {
-			logTick = true;
-			this.log.debug('Tick', now.toLocaleString(), this.instance);
+	tick() {
+		if (this.isDestroyed()) return;
+
+		if (this.state === this.globalStates.DISABLED) {
+			return;
+		}
+
+		if (this.state === this.globalStates.PAUSED) {
+			return;
+		}
+
+		const now = new Date();
+		const logTick = this.tickShouldLog(now);
+		if (!this.lastTickLogged) this.lastTickLogged = now;
+
+		if (logTick) {
+			this.log.debug(
+				'Tick',
+				now.toLocaleString(),
+				`${this.slots.size} slots`
+			);
 			this.lastTickLogged = now;
 		}
 
 		const refreshSlots = [];
-		const slotData = [];
-		this.timers.forEach((fireTime, slot) => {
-			if (this.slotIsExcluded(slot)) {
-				this.deleteSlotTimer(slot);
+		this.slots.forEach((slotData) => {
+			if (
+				document.getElementById(slotData.slot.getSlotElementId()) ===
+				null
+			) {
+				this.slots.delete(slotData.id);
 				return;
 			}
-			if (now >= fireTime) {
-				const id = slot.getSlotElementId();
-				const pos = slot.getTargeting('pos');
-				const isInViewport = this.isSlotViewable(slot);
-				if (testForViewability && !isInViewport) {
-					if (logTick) {
-						this.log.debug('Not in viewport', { pos, id });
-					}
-					this.setSlotTimer(
-						slot,
-						new Date(fireTime.getTime() + 1000)
-					);
-				} else {
-					this.log.debug('Queueing for refresh', { pos, id });
-					this.deleteSlotTimer(slot);
-					refreshSlots.push(slot);
-					slotData.push(
-						window.__CMLSINTERNAL.adTag.listSlotData(slot)
-					);
-				}
+			if (!slotData.canRefresh()) {
+				return;
+			}
+			if (!slotData.nextRefresh) {
+				this.setSlotTimer(slotData.slot);
+				return;
+			}
+			if (now >= slotData.nextRefresh) {
+				refreshSlots.push(slotData.slot);
 			}
 		});
 
 		if (refreshSlots.length) {
-			this.log.info(
-				`${new Date().toLocaleString()} Refreshing ${refreshSlots.length} slots`,
-				slotData
-			);
-			window.__CMLSINTERNAL.adTag.refresh(refreshSlots);
+			this.refreshSlots(refreshSlots);
 		}
 
-		// Check slots which haven't delivered yet
-		/*
-		const forceLaggingSlots = [];
-		this.discoveredSlots.forEach((data, slot) => {
-			const id = slot.getSlotElementId();
-			if (config.excludeFromForcedRefresh.includes(id)) return;
-			if (data.lastRequested && !data.lastViewable) {
+		// Check for slots which haven't delivered creative past the refresh interval.
+		// We look at their last request time, and if it's been longer than
+		// the refresh interval, we refresh them.
+		const forceRefreshSlots = [];
+		this.slots.forEach((slotData) => {
+			if (!slotData.empty) {
+				if (logTick) {
+					this.log.debug(
+						'Slot is not empty, not forcing refresh',
+						slotData.summary
+					);
+				}
+				return;
+			}
+			if (!slotData.lastRequest) {
+				if (logTick) {
+					this.log.debug(
+						'Slot has no last request, not forcing refresh',
+						slotData.summary
+					);
+				}
+				return;
+			}
+			if (refreshSlots.includes(slotData.slot)) {
+				// Slot has already been refreshed
+				return;
+			}
+			if (
+				excludeFromForcedRefresh.includes(
+					slotData.slot.getSlotElementId()
+				)
+			) {
+				return;
+			}
+			if (slotData.neverRefresh) {
+				if (logTick) {
+					this.log.debug(
+						'Slot is neverRefresh, not forcing refresh',
+						slotData.summary
+					);
+				}
+				return;
+			}
+			if (
+				!slotData.lastViewableImpression ||
+				slotData.lastViewableImpression < slotData.lastRequest
+			) {
+				// Slot has never delivered a viewable impression
 				if (
-					now.getTime() >=
-					data.lastRequested.getTime() + this.every * 60000
+					now.getTime() - slotData.lastRequest.getTime() >
+					this.every
 				) {
-					if (this.wouldSlotBeViewable(slot)) {
-						this.log.debug('Slot would be viewable', { id });
-						forceLaggingSlots.push(slot);
+					// Only ever force-refresh viewable slots
+					if (SlotData.testViewability(slotData.slot, true)) {
+						forceRefreshSlots.push(slotData.slot);
 					}
 				}
 			}
 		});
-		if (forceLaggingSlots.length) {
-			forceLaggingSlots.forEach((slot) => {
-				const id = slot.getSlotElementId();
-				if (config.excludeFromForcedRefresh.includes(id)) return;
-				this.log.warn(
-					'Forcing lagging slot',
-					window.__CMLSINTERNAL.adTag.listSlotData(slot)
-				);
-				this.updateLastRequested(slot);
-			});
-			window.__CMLSINTERNAL.adTag.refresh(forceLaggingSlots);
+		if (forceRefreshSlots.length) {
+			this.refreshSlots(
+				forceRefreshSlots,
+				`Force refreshing ${forceRefreshSlots.length} slots`
+			);
 		}
-		*/
+	}
+
+	refreshSlots(slots, logline = null) {
+		if (!Array.isArray(slots)) {
+			slots = [slots];
+		}
+		if (!slots.length) return;
+		if (!logline) logline = `Refreshing ${slots.length} slots`;
+		this.log.info(
+			logline,
+			new Date().toLocaleString(),
+			slots.map((slot) => this.getSlotData(slot).summary)
+		);
+		slots.forEach((slot) => {
+			this.deleteSlotTimer(slot);
+			this.setSlotData(slot, {
+				lastRequest: new Date(),
+			});
+		});
+		window.__CMLSINTERNAL.adTag.refresh(slots);
+	}
+
+	isDestroyed() {
+		return this.state === this.globalStates.DESTROYED;
+	}
+
+	throwIfDestroyed() {
+		if (this.isDestroyed()) {
+			throw new Error(this.globalStates.DESTROYED);
+		}
+	}
+
+	pause() {
+		this.throwIfDestroyed();
+		this.state = this.globalStates.PAUSED;
+	}
+
+	unpause() {
+		this.throwIfDestroyed();
+		this.state = this.globalStates.RUNNING;
+		if (!this.interval) this.initInterval();
+	}
+
+	disable() {
+		this.throwIfDestroyed();
+		this.state = this.globalStates.DISABLED;
+		this.clearInterval();
+	}
+
+	enable() {
+		this.throwIfDestroyed();
+		this.state = this.globalStates.RUNNING;
+		this.initInterval();
 	}
 
 	destroy() {
-		if (this.interval) {
-			clearInterval(this.interval);
-			this.interval = null;
-		}
-		this.timers.forEach((fireTime, slot) => {
-			this.deleteSlotTimer(slot);
-		});
+		if (this.isDestroyed()) return;
+
+		this.disable();
+		this.state = this.globalStates.DESTROYED;
+
+		const adTag = window.__CMLSINTERNAL.adTag;
+		Object.entries(this.boundListeners).forEach(([e, fn]) =>
+			adTag.removeListener(e, fn)
+		);
 	}
 }
 
 function init() {
+	window.__CMLSINTERNAL[nameSpace]?.destroy?.();
 	window.__CMLSINTERNAL[nameSpace] = new AdRefresher();
 	log.debug('Initialized.');
 }
