@@ -1,13 +1,35 @@
 /**
  * Auto-refresh ads.
  *
- * Auto-refresh ads on a per-slot basis. Also refreshes slots which
- * did not deliver an impression.
+ * Refreshes GPT ad slots on a per-slot timer, and separately re-requests
+ * slots that came back empty.
  *
- * Each slot has its own refresh fire time, set if one or both of
- * the following conditions are met:
- * 1) impressionViewable event has previously fired on the slot
- * 2) Slot's pos targeting value is in the ALWAYS_REFRESH_POS list
+ * Two passes run on every tick (`config.tickInterval`):
+ *
+ * 1) Refresh pass - any slot that passes `SlotData.canRefresh()` is given a
+ *    fire time `config.defaultRefreshInMinutes` in the future. Once that time
+ *    is reached the slot is refreshed and its timer is cleared.
+ * 2) Force-refresh pass - slots that rendered empty and have not delivered a
+ *    viewable impression since their last request are re-requested once the
+ *    refresh interval has elapsed, provided they would be viewable if GPT
+ *    had not collapsed them.
+ *
+ * A slot is excluded from both passes when any of the following is true:
+ * - its div id is in `window._CMLS.autoRefreshAdsExclusion`
+ * - it carries `never_refresh` targeting, or `refresh` targeting with a
+ *   falsy value or the literal value `never_refresh`
+ *
+ * Slots carrying `always_refresh` targeting, or a `pos` value listed in
+ * `config.ALWAYS_REFRESH_POS`, refresh regardless of viewability.
+ *
+ * Public interface (all optional):
+ * - `window.DISABLE_AUTO_REFRESH_ADS` - truthy disables the module
+ * - `window._CMLS.autoRefreshAdsInterval` - refresh interval in minutes,
+ *   or 0 to disable. Read once, at construction.
+ * - `window._CMLS.autoRefreshAdsExclusion` - array of div ids to skip. Read
+ *   on every tick, so it can be appended to at any point in the page life.
+ * - `window.__CMLSINTERNAL.autoRefreshAds` - the live AdRefresher instance,
+ *   exposing pause/unpause/disable/enable/destroy.
  */
 
 import config from './config.json';
@@ -70,25 +92,44 @@ window.__CMLSINTERNAL.clearAutoRefreshAdsExclusion = () => {
 	window.__CMLSINTERNAL.initAutoRefreshAdsExclusion();
 };
 
+/**
+ * Per-slot bookkeeping for a single googletag.Slot.
+ *
+ * Holds the slot's refresh timer and the event timestamps the refresh
+ * decisions are made from. Instances live in `AdRefresher.slots`, keyed by
+ * `SlotData.generateDataId()`.
+ */
 class SlotData {
 	adRefresher = null;
 	slot = null;
 
+	// Last time GPT requested this slot, including our own refreshes.
 	_lastRequest = null;
 
 	_lastResponse = null;
 
 	_lastRendered = null;
 
+	// Last time GPT reported a viewable impression on this slot.
 	_lastViewableImpression = null;
 
+	// Cached viewability. Kept current by the slotVisibilityChanged listener;
+	// computed on first read for slots that have not fired that event yet.
 	_viewable = null;
 
+	// When this slot is next due to refresh, or null if no timer is armed.
 	nextRefresh = null;
 
+	// Last computed value of the matching getter. Not used as a cache - the
+	// getters recompute every call so late targeting and exclusion-list
+	// changes take effect - but kept as an escape hatch for reading the last
+	// known value without paying for the recompute.
 	_alwaysRefresh = null;
 	_neverRefresh = null;
 
+	// Whether the last render came back without a creative. Defaults to true
+	// so a slot that never renders at all is still eligible for the
+	// force-refresh pass.
 	empty = true;
 
 	constructor(adRefresher, slot) {
@@ -124,6 +165,13 @@ class SlotData {
 		};
 	}
 
+	/**
+	 * Whether this slot refreshes regardless of viewability, either from
+	 * `always_refresh` targeting or from its `pos` appearing in
+	 * `config.ALWAYS_REFRESH_POS`.
+	 *
+	 * @returns {boolean}
+	 */
 	get alwaysRefresh() {
 		const pos = this.slot.getTargeting('pos');
 		const targetedAlways = includesTruthy(
@@ -141,6 +189,16 @@ class SlotData {
 		return this._alwaysRefresh;
 	}
 
+	/**
+	 * Whether this slot is excluded from refreshing, by the public exclusion
+	 * list or by targeting.
+	 *
+	 * Deliberately recomputed on every call rather than cached: the exclusion
+	 * list is public and may be appended to long after the slot is first seen.
+	 * `_neverRefresh` only suppresses repeat logging.
+	 *
+	 * @returns {boolean}
+	 */
 	get neverRefresh() {
 		const alreadyKnown = this._neverRefresh === true;
 		const id = this.slot.getSlotElementId();
@@ -179,6 +237,12 @@ class SlotData {
 		return false;
 	}
 
+	/**
+	 * Cached viewability, seeded from a geometry test the first time it is
+	 * read and kept current thereafter by the slotVisibilityChanged listener.
+	 *
+	 * @returns {boolean}
+	 */
 	get viewable() {
 		if (this._viewable === null) {
 			this._viewable = SlotData.testViewability(this.slot);
@@ -188,6 +252,9 @@ class SlotData {
 	set viewable(val = false) {
 		this._viewable = !!val;
 	}
+
+	// The timestamp setters below all default to "now" when passed a falsy
+	// value, so callers can write `slotData.lastRequest = null` to stamp it.
 
 	get lastRequest() {
 		return this._lastRequest;
@@ -226,6 +293,12 @@ class SlotData {
 		this._lastViewableImpression = val;
 	}
 
+	/**
+	 * Reads and writes the slot's `refresh` targeting on the live GPT slot.
+	 *
+	 * The getter returns googletag's raw array; in practice the key only ever
+	 * carries a single value. The setter takes that single value.
+	 */
 	get refreshKey() {
 		return this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY);
 	}
@@ -259,6 +332,13 @@ class SlotData {
 	/**
 	 * Checks if a provided slot is within the viewport by at
 	 * least `config.viewabilityRatio`
+	 *
+	 * When GPT fails to fill a slot it collapses the div with an inline
+	 * `display: none`, which leaves the element with no box to measure. Pass
+	 * `reveal` to un-hide the div for the duration of the measurement and
+	 * restore it afterwards, answering "would this slot be viewable if GPT had
+	 * not collapsed it". The restore runs in a `finally` so the div is never
+	 * left visible if an early return or a throw happens mid-measure.
 	 *
 	 * @param slot googletag.Slot
 	 * @param reveal Force element to be visible before testing
@@ -344,6 +424,14 @@ class SlotData {
 		return SlotData.testViewability(this.slot, reveal);
 	}
 
+	/**
+	 * Whether the refresh pass should consider this slot on this tick.
+	 *
+	 * Note this is the gate for the normal refresh pass only; the
+	 * force-refresh pass in `AdRefresher.tick` applies its own conditions.
+	 *
+	 * @returns {boolean}
+	 */
 	canRefresh() {
 		if (this.neverRefresh) {
 			this.nextRefresh = null;
@@ -374,8 +462,16 @@ class SlotData {
 	}
 }
 
+/**
+ * Drives the refresh cycle for every slot on the page.
+ *
+ * One instance is created per page load and published at
+ * `window.__CMLSINTERNAL[config.nameSpace]`. It discovers the slots that
+ * already exist, listens for later ones, and runs `tick()` on an interval.
+ */
 class AdRefresher {
-	// Generate a random instance string
+	// Generate a random instance string. Logged with every line so overlapping
+	// instances are distinguishable if one is ever left running.
 	instance = Math.ceil(Math.random() * 10000);
 
 	log = new Logger(`${scriptName} ${version} [${this.instance}]`);
@@ -419,12 +515,26 @@ class AdRefresher {
 
 	boundListeners = {};
 
+	/**
+	 * @param milliseconds Refresh interval. Overridden by
+	 *                     `window._CMLS.autoRefreshAdsInterval`, which is
+	 *                     expressed in minutes.
+	 */
 	constructor(milliseconds = defaultRefreshInMinutes * 60000) {
 		// Allows a global override of the refresh time
 		if (window?._CMLS?.autoRefreshAdsInterval > 0) {
 			this.every = window._CMLS.autoRefreshAdsInterval * 60000;
 		} else {
 			this.every = milliseconds;
+		}
+
+		// Floor the interval. Anything at or below the tick rate would refresh
+		// on every tick, so a mistyped override cannot run away.
+		if (this.every < 30000) {
+			this.log.warn(
+				`Refresh interval of ${this.every}ms is below the 30s floor, clamping.`
+			);
+			this.every = 30000;
 		}
 
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
@@ -442,7 +552,9 @@ class AdRefresher {
 		adTag.getSlots().forEach((slot) => {
 			let slotData = this.setSlotData(slot);
 
-			slotData.lastRequest = new Date();
+			if (adTag.wasSlotRequested(slot)) {
+				slotData.lastRequest = new Date();
+			}
 
 			// If the slot has been filled, assume it has been viewable
 			if (slot.getResponseInformation()) {
@@ -450,8 +562,11 @@ class AdRefresher {
 				slotData.empty = false;
 			}
 
-			// Check for always-refresh slots and set their timer immediately
-			if (slotData.alwaysRefresh) {
+			// Check for always-refresh slots and set their timer immediately.
+			// Gated on lastRequest so we never stamp refresh targeting onto a
+			// slot's initial request - the tick skips unrequested slots anyway,
+			// and the slotRequested listener arms them once they are requested.
+			if (slotData.alwaysRefresh && slotData.lastRequest) {
 				this.log.debug(
 					`Slot ${slot.getSlotElementId()} is set to always refresh. Setting timer immediately`,
 					slotData.summary
@@ -485,6 +600,13 @@ class AdRefresher {
 		}
 	}
 
+	/**
+	 * Starts the tick interval, unless the global conditions refuse.
+	 *
+	 * Callers must set `this.state` before calling: `checkGlobalConditions()`
+	 * both reads and writes it, so a stale PAUSED or DISABLED value here would
+	 * silently prevent the interval from starting.
+	 */
 	initInterval() {
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
 			return;
@@ -539,6 +661,9 @@ class AdRefresher {
 		return RUNNING;
 	}
 
+	/**
+	 * @returns {SlotData|undefined} Existing data for the slot, if any.
+	 */
 	getSlotData(slot) {
 		if (!SlotData.isGoogleSlot(slot)) {
 			throw new Error('getSlotData must be passed a googletag.Slot');
@@ -546,6 +671,15 @@ class AdRefresher {
 		return this.slots.get(SlotData.generateDataId(slot));
 	}
 
+	/**
+	 * Creates the slot's data if it does not exist yet, applies `newData` to
+	 * it, and returns it. Called with no `newData` purely to get-or-create.
+	 *
+	 * `newData` keys are assigned, so accessor-backed properties such as
+	 * `lastRequest` and `refreshKey` run their setters.
+	 *
+	 * @returns {SlotData}
+	 */
 	setSlotData(slot, newData = {}) {
 		if (!SlotData.isGoogleSlot(slot)) {
 			throw new Error('setSlotData must be passed a googletag.Slot');
@@ -569,9 +703,14 @@ class AdRefresher {
 		const slot = e.slot;
 		let slotData = this.setSlotData(slot);
 		slotData.lastRequest = new Date();
+		if (slotData.nextRefresh) this.setSlotTimer(slot);
 		this.log.debug('Slot requested', slotData.summary);
 	}
 
+	/**
+	 * A viewable impression is the signal that a slot is genuinely on screen
+	 * and filled, so it arms the refresh timer if nothing has armed it yet.
+	 */
 	listenForViewableImpressions(e) {
 		const slot = e.slot;
 		let slotData = this.setSlotData(slot);
@@ -586,6 +725,11 @@ class AdRefresher {
 		if (!slotData.nextRefresh) this.setSlotTimer(slot);
 	}
 
+	/**
+	 * Records whether the render delivered a creative. `e.isEmpty` is the
+	 * authoritative signal that GPT is about to collapse the div, and is what
+	 * the force-refresh pass keys off.
+	 */
 	listenForSlotRenderEnded(e) {
 		const slot = e.slot;
 		let slotData = this.getSlotData(slot);
@@ -604,6 +748,10 @@ class AdRefresher {
 		this.log.debug('Slot rendered', slotData.summary);
 	}
 
+	/**
+	 * Keeps `SlotData.viewable` current from GPT's own viewport reporting,
+	 * which is cheaper and more accurate than re-measuring on every tick.
+	 */
 	listenForSlotViewable(e) {
 		const slot = e.slot;
 		let slotData = this.getSlotData(slot);
@@ -618,6 +766,12 @@ class AdRefresher {
 		}
 	}
 
+	/**
+	 * Arms the slot's refresh timer and marks it as pending in targeting.
+	 *
+	 * @param slot googletag.Slot
+	 * @param fireTime When to refresh. Defaults to `this.every` from now.
+	 */
 	setSlotTimer(slot, fireTime = null) {
 		const slotData = this.getSlotData(slot);
 
@@ -637,6 +791,10 @@ class AdRefresher {
 		slotData.nextRefresh = fireTime;
 	}
 
+	/**
+	 * Disarms the slot's refresh timer and moves its targeting from "pending"
+	 * to "has refreshed". Slots that never carried the key are left alone.
+	 */
 	deleteSlotTimer(slot) {
 		const slotData = this.getSlotData(slot);
 		slotData.nextRefresh = null;
@@ -649,6 +807,13 @@ class AdRefresher {
 		}
 	}
 
+	/**
+	 * Ticks run every second but are only logged every `tickLogInterval`, to
+	 * keep the console usable. Evaluate this once per tick and reuse the
+	 * result, since the first log updates `lastTickLogged`.
+	 *
+	 * @returns {boolean}
+	 */
 	tickShouldLog(now = new Date()) {
 		if (!this.lastTickLogged) return true;
 		return (
@@ -656,6 +821,9 @@ class AdRefresher {
 		);
 	}
 
+	/**
+	 * The refresh cycle. Runs every `config.tickInterval` milliseconds.
+	 */
 	tick() {
 		if (this.isDestroyed()) return;
 
@@ -680,6 +848,9 @@ class AdRefresher {
 			this.lastTickLogged = now;
 		}
 
+		// Refresh pass. Arms a timer on any slot eligible to refresh, and
+		// collects the ones whose timer has come due. Doubles as our garbage
+		// collection: slots whose div has left the DOM are dropped here.
 		const refreshSlots = [];
 		this.slots.forEach((slotData) => {
 			if (
@@ -687,6 +858,10 @@ class AdRefresher {
 				null
 			) {
 				this.slots.delete(slotData.id);
+				return;
+			}
+			if (!slotData.lastRequest) {
+				// Defined but never requested, nothing to refresh yet...
 				return;
 			}
 			if (!slotData.canRefresh()) {
@@ -705,9 +880,11 @@ class AdRefresher {
 			this.refreshSlots(refreshSlots);
 		}
 
-		// Check for slots which haven't delivered creative past the refresh interval.
-		// We look at their last request time, and if it's been longer than
-		// the refresh interval, we refresh them.
+		// Force-refresh pass. Slots that came back empty never fire an
+		// impressionViewable, and GPT has collapsed the div, which makes them
+		// unviewable by definition - so the refresh pass above can never arm
+		// them. Give them another request once the refresh interval has
+		// elapsed, as long as they would be on screen if not collapsed.
 		const forceRefreshSlots = [];
 		this.slots.forEach((slotData) => {
 			if (!slotData.empty) {
@@ -752,7 +929,10 @@ class AdRefresher {
 				!slotData.lastViewableImpression ||
 				slotData.lastViewableImpression < slotData.lastRequest
 			) {
-				// Slot has never delivered a viewable impression
+				// No viewable impression since the last request. Compared
+				// against lastRequest rather than merely checking for absence,
+				// so a slot that filled once and later went empty is still
+				// picked up here.
 				if (
 					now.getTime() - slotData.lastRequest.getTime() >
 					this.every
@@ -772,6 +952,12 @@ class AdRefresher {
 		}
 	}
 
+	/**
+	 * Refreshes the given slots and resets their bookkeeping.
+	 *
+	 * @param slots One googletag.Slot or an array of them
+	 * @param logline Overrides the default log message
+	 */
 	refreshSlots(slots, logline = null) {
 		if (!Array.isArray(slots)) {
 			slots = [slots];
@@ -802,6 +988,10 @@ class AdRefresher {
 		}
 	}
 
+	/**
+	 * Stops refreshing but leaves the interval running, so `unpause()` resumes
+	 * immediately. Timers already armed keep their fire times.
+	 */
 	pause() {
 		this.throwIfDestroyed();
 		this.state = this.globalStates.PAUSED;
@@ -813,6 +1003,10 @@ class AdRefresher {
 		if (!this.interval) this.initInterval();
 	}
 
+	/**
+	 * Stops refreshing and tears down the interval. Reversible via `enable()`,
+	 * which re-checks the global conditions before restarting.
+	 */
 	disable() {
 		this.throwIfDestroyed();
 		this.state = this.globalStates.DISABLED;
@@ -825,6 +1019,12 @@ class AdRefresher {
 		this.initInterval();
 	}
 
+	/**
+	 * Permanently retires this instance: stops the interval and unregisters
+	 * every listener. Idempotent, and every other lifecycle method throws
+	 * afterwards. Listeners are removed by the same bound references they were
+	 * added with, which is why `boundListeners` is held rather than rebound.
+	 */
 	destroy() {
 		if (this.isDestroyed()) return;
 
@@ -838,6 +1038,10 @@ class AdRefresher {
 	}
 }
 
+/**
+ * Replaces any existing instance, so a double include cannot leave two
+ * refreshers ticking against the same slots.
+ */
 function init() {
 	window.__CMLSINTERNAL[nameSpace]?.destroy?.();
 	window.__CMLSINTERNAL[nameSpace] = new AdRefresher();
