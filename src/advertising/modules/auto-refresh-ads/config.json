@@ -4,6 +4,7 @@
 	"version": "0.7",
 
 	"defaultRefreshInMinutes": 1,
+	"refreshUndeliveredInMilliseconds": 35000,
 
 	"testForViewability": true,
 	"viewabilityRatio": 0.5,

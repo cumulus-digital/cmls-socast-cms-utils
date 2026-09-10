@@ -479,6 +479,7 @@ class AdRefresher {
 	log = new Logger(`${scriptName} ${version} [${this.instance}]`);
 
 	every = defaultRefreshInMinutes * 60000;
+	undeliveredRefreshTime = config.refreshUndeliveredInMilliseconds;
 
 	// Global state of the ad refresher
 	globalStates = {
@@ -541,6 +542,11 @@ class AdRefresher {
 				`Refresh interval of ${this.every}ms is below the 30s floor, clamping.`
 			);
 			this.every = 30000;
+		}
+
+		// Undelivered refresh time cannot be longer than the refresh interval
+		if (this.undeliveredRefreshTime > this.every) {
+			this.undeliveredRefreshTime = this.every;
 		}
 
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
@@ -972,7 +978,12 @@ class AdRefresher {
 				return;
 			}
 
-			if (now.getTime() - slotData.lastRequest.getTime() <= this.every) {
+			// Require that the last request was at least
+			// config.refreshUndeliveredInMilliseconds ago
+			if (
+				now.getTime() - slotData.lastRequest.getTime() <=
+				this.undeliveredRefreshTime
+			) {
 				return;
 			}
 
