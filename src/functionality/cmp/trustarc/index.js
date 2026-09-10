@@ -28,7 +28,6 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 
 	if (!document.getElementById('trustarc-sdk-styles')) {
 		import(
-			/* webpackMode: "eager" */
 			/* webpackChunkName: "functionality/cmp/trustarc/styles" */
 			'./styles.scss'
 		).then((style) => {

@@ -24,8 +24,8 @@
  *
  * Public interface (all optional):
  * - `window.DISABLE_AUTO_REFRESH_ADS` - truthy disables the module
- * - `window._CMLS.autoRefreshAdsInterval` - refresh interval in minutes,
- *   or 0 to disable. Read once, at construction.
+ * - `window._CMLS.autoRefreshAdsInterval` - refresh interval in minutes, or 0
+ *   to disable. Read once, at construction, and floored at 30 seconds.
  * - `window._CMLS.autoRefreshAdsExclusion` - array of div ids to skip. Read
  *   on every tick, so it can be appended to at any point in the page life.
  * - `window.__CMLSINTERNAL.autoRefreshAds` - the live AdRefresher instance,
@@ -152,6 +152,7 @@ class SlotData {
 
 	get summary() {
 		return {
+			element: document.getElementById(this.slot.getSlotElementId()),
 			elementId: this.slot.getSlotElementId(),
 			pos: this.slot.getTargeting('pos'),
 			refresh: this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY),
@@ -206,10 +207,10 @@ class SlotData {
 		// Check if excluded
 		if (window._CMLS?.autoRefreshAdsExclusion?.includes(id)) {
 			if (!alreadyKnown) {
-				this.adRefresher.log.debug(
+				this.adRefresher.log.debug(() => [
 					'Slot excluded from refresh by public exclusion',
-					this.summary
-				);
+					this.summary,
+				]);
 			}
 			this._neverRefresh = true;
 			return true;
@@ -221,13 +222,14 @@ class SlotData {
 			includesTruthy(
 				this.slot.getTargeting(AdRefresher.TARGET_NEVER_REFRESH_KEY)
 			) ||
-			t.includes(AdRefresher.TARGET_NEVER_REFRESH_KEY)
+			t.includes(AdRefresher.TARGET_NEVER_REFRESH_KEY) ||
+			t.includes(AdRefresher.TARGET_FALSE)
 		) {
 			if (!alreadyKnown) {
-				this.adRefresher.log.debug(
+				this.adRefresher.log.debug(() => [
 					'Slot excluded from refresh by targeting',
-					this.summary
-				);
+					this.summary,
+				]);
 			}
 			this._neverRefresh = true;
 			return true;
@@ -513,6 +515,10 @@ class AdRefresher {
 	// Holds time of last tick log
 	lastTickLogged = null;
 
+	// Serialized force-refresh skip list from the last tick, so that line is
+	// logged on change rather than on a timer.
+	lastNotForcedRefresh = null;
+
 	boundListeners = {};
 
 	/**
@@ -577,9 +583,14 @@ class AdRefresher {
 
 		this.log.debug('Setting up listeners...');
 		this.boundListeners = {
-			slotRequested: this.listenForSlotRequested.bind(this),
 			impressionViewable: this.listenForViewableImpressions.bind(this),
+			slotOnload: this.genericSlotListener.bind(this, 'slotOnload'),
 			slotRenderEnded: this.listenForSlotRenderEnded.bind(this),
+			slotRequested: this.listenForSlotRequested.bind(this),
+			slotResponseReceived: this.genericSlotListener.bind(
+				this,
+				'slotResponseReceived'
+			),
 			slotVisibilityChanged: this.listenForSlotViewable.bind(this),
 		};
 		Object.entries(this.boundListeners).forEach(([e, fn]) =>
@@ -699,12 +710,27 @@ class AdRefresher {
 		return this.getSlotData(slot);
 	}
 
-	listenForSlotRequested(e) {
+	/**
+	 * A generic googletag.events.Event listener, used solely to ensure
+	 * that a lastRequest timestamp is set.
+	 *
+	 * Logs the div id rather than a full summary: the listeners that actually
+	 * act on an event already log the slot's state, and these two fire on
+	 * every creative load.
+	 *
+	 * @param eventName Bound per event, since the handler is shared
+	 * @param e googletag.events.Event
+	 */
+	genericSlotListener(eventName, e) {
 		const slot = e.slot;
 		let slotData = this.setSlotData(slot);
-		slotData.lastRequest = new Date();
-		if (slotData.nextRefresh) this.setSlotTimer(slot);
-		this.log.debug('Slot requested', slotData.summary);
+		if (!slotData.lastRequest) {
+			slotData.lastRequest = new Date();
+		}
+		if (eventName === 'slotResponseReceived') {
+			slotData.lastResponse = new Date();
+		}
+		this.log.debug(`Slot ${eventName}`, slot.getSlotElementId());
 	}
 
 	/**
@@ -714,7 +740,7 @@ class AdRefresher {
 	listenForViewableImpressions(e) {
 		const slot = e.slot;
 		let slotData = this.setSlotData(slot);
-		this.log.debug('Impression viewable', slotData.summary);
+		this.log.debug(() => ['Impression viewable', slotData.summary]);
 		slotData.lastViewableImpression = new Date();
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
@@ -725,6 +751,14 @@ class AdRefresher {
 		if (!slotData.nextRefresh) this.setSlotTimer(slot);
 	}
 
+	listenForSlotRequested(e) {
+		const slot = e.slot;
+		let slotData = this.setSlotData(slot);
+		slotData.lastRequest = new Date();
+		if (slotData.nextRefresh) this.setSlotTimer(slot);
+		this.log.debug(() => ['Slot requested', slotData.summary]);
+	}
+
 	/**
 	 * Records whether the render delivered a creative. `e.isEmpty` is the
 	 * authoritative signal that GPT is about to collapse the div, and is what
@@ -732,9 +766,9 @@ class AdRefresher {
 	 */
 	listenForSlotRenderEnded(e) {
 		const slot = e.slot;
-		let slotData = this.getSlotData(slot);
-		if (!slotData) {
-			slotData = this.setSlotData(slot, { lastRequest: new Date() });
+		let slotData = this.setSlotData(slot);
+		if (!slotData.lastRequest) {
+			slotData.lastRequest = new Date();
 		}
 		slotData.lastRendered = new Date();
 		if (e.isEmpty) {
@@ -745,7 +779,7 @@ class AdRefresher {
 		if (slotData.canRefresh() && !slotData.nextRefresh) {
 			this.setSlotTimer(slot);
 		}
-		this.log.debug('Slot rendered', slotData.summary);
+		this.log.debug(() => ['Slot rendered', slotData.summary]);
 	}
 
 	/**
@@ -754,9 +788,9 @@ class AdRefresher {
 	 */
 	listenForSlotViewable(e) {
 		const slot = e.slot;
-		let slotData = this.getSlotData(slot);
-		if (!slotData) {
-			slotData = this.setSlotData(slot, { lastRequest: new Date() });
+		let slotData = this.setSlotData(slot);
+		if (!slotData.lastRequest) {
+			slotData.lastRequest = new Date();
 		}
 		const viewable = e.inViewPercentage;
 		if (viewable >= viewabilityRatio * 100) {
@@ -835,6 +869,10 @@ class AdRefresher {
 			return;
 		}
 
+		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
+			return;
+		}
+
 		const now = new Date();
 		const logTick = this.tickShouldLog(now);
 		if (!this.lastTickLogged) this.lastTickLogged = now;
@@ -886,27 +924,28 @@ class AdRefresher {
 		// them. Give them another request once the refresh interval has
 		// elapsed, as long as they would be on screen if not collapsed.
 		const forceRefreshSlots = [];
+
+		// Why a slot was passed over, collected so logging ticks emit one line
+		// for the whole pass rather than one per slot. Only tracks the reasons
+		// worth investigating - a slot skipped because it is not yet due, was
+		// already refreshed above, or is off screen is behaving as designed.
+		const notForcedRefreshSlots = {
+			notEmpty: [],
+			notRequested: [],
+			excluded: [],
+			neverRefresh: [],
+		};
 		this.slots.forEach((slotData) => {
 			if (!slotData.empty) {
-				if (logTick) {
-					this.log.debug(
-						'Slot is not empty, not forcing refresh',
-						slotData.summary
-					);
-				}
+				notForcedRefreshSlots.notEmpty.push(slotData);
 				return;
 			}
 			if (!slotData.lastRequest) {
-				if (logTick) {
-					this.log.debug(
-						'Slot has no last request, not forcing refresh',
-						slotData.summary
-					);
-				}
+				notForcedRefreshSlots.notRequested.push(slotData);
 				return;
 			}
 			if (refreshSlots.includes(slotData.slot)) {
-				// Slot has already been refreshed
+				// Already refreshed by the pass above
 				return;
 			}
 			if (
@@ -914,36 +953,67 @@ class AdRefresher {
 					slotData.slot.getSlotElementId()
 				)
 			) {
+				notForcedRefreshSlots.excluded.push(slotData);
 				return;
 			}
 			if (slotData.neverRefresh) {
-				if (logTick) {
-					this.log.debug(
-						'Slot is neverRefresh, not forcing refresh',
-						slotData.summary
-					);
-				}
+				notForcedRefreshSlots.neverRefresh.push(slotData);
 				return;
 			}
+
+			// Require that no viewable impression has landed since the last
+			// request. Compared against lastRequest rather than merely checking
+			// for absence, so a slot that filled once and later went empty is
+			// still picked up here.
 			if (
-				!slotData.lastViewableImpression ||
-				slotData.lastViewableImpression < slotData.lastRequest
+				slotData.lastViewableImpression &&
+				slotData.lastViewableImpression >= slotData.lastRequest
 			) {
-				// No viewable impression since the last request. Compared
-				// against lastRequest rather than merely checking for absence,
-				// so a slot that filled once and later went empty is still
-				// picked up here.
-				if (
-					now.getTime() - slotData.lastRequest.getTime() >
-					this.every
-				) {
-					// Only ever force-refresh viewable slots
-					if (SlotData.testViewability(slotData.slot, true)) {
-						forceRefreshSlots.push(slotData.slot);
-					}
-				}
+				return;
 			}
+
+			if (now.getTime() - slotData.lastRequest.getTime() <= this.every) {
+				return;
+			}
+
+			// Only ever force-refresh slots that would be on screen
+			if (!SlotData.testViewability(slotData.slot, true)) {
+				return;
+			}
+
+			forceRefreshSlots.push(slotData.slot);
 		});
+		// Div ids rather than full summaries: this line answers "which slots did
+		// we pass over, and why", and the per-event listeners already log each
+		// slot's full state.
+		const notForcedRefreshSlotsSummary = {};
+		let notForcedRefreshCount = 0;
+
+		for (const [reason, slots] of Object.entries(notForcedRefreshSlots)) {
+			if (!slots.length) continue;
+			notForcedRefreshSlotsSummary[reason] = slots.map((slotData) =>
+				slotData.slot.getSlotElementId()
+			);
+			notForcedRefreshCount += slots.length;
+		}
+
+		// Logged on change rather than on the tick-log timer: these buckets only
+		// move on slot events, so a transition is the only thing worth seeing.
+		// Recorded unconditionally so an empty tick still counts as a change and
+		// the same skip list is reported again if it returns.
+		const notForcedRefreshKey = JSON.stringify(
+			notForcedRefreshSlotsSummary
+		);
+		const notForcedRefreshChanged =
+			notForcedRefreshKey !== this.lastNotForcedRefresh;
+		this.lastNotForcedRefresh = notForcedRefreshKey;
+
+		if (notForcedRefreshCount && notForcedRefreshChanged) {
+			this.log.debug(
+				`Force-refresh check skips ${notForcedRefreshCount} slots:`,
+				notForcedRefreshSlotsSummary
+			);
+		}
 		if (forceRefreshSlots.length) {
 			this.refreshSlots(
 				forceRefreshSlots,
@@ -997,6 +1067,11 @@ class AdRefresher {
 		this.state = this.globalStates.PAUSED;
 	}
 
+	/**
+	 * Resumes after `pause()`, restarting the interval if one is not already
+	 * running. Assigns the state first: `initInterval()` re-checks the global
+	 * conditions, which short-circuit on a stale PAUSED state.
+	 */
 	unpause() {
 		this.throwIfDestroyed();
 		this.state = this.globalStates.RUNNING;
@@ -1013,6 +1088,11 @@ class AdRefresher {
 		this.clearInterval();
 	}
 
+	/**
+	 * Resumes after `disable()`, rebuilding the interval. Assigns the state
+	 * before calling `initInterval()`, which may legitimately set it back to
+	 * DISABLED if a global condition still refuses.
+	 */
 	enable() {
 		this.throwIfDestroyed();
 		this.state = this.globalStates.RUNNING;

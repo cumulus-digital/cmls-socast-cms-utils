@@ -78,12 +78,26 @@ module.exports = (env) => {
 		target: target,
 		devtool: isProduction ? false : 'source-map',
 		entry: () => {
+			// main.js always loads first and is never absent, so the other
+			// entries share its webpack runtime and vendor modules via dependOn
+			// rather than each bundling their own copy of core-js and lodash.
+			// bundle.js is the all-in-one build (it requires main + advertising
+			// directly) and stays standalone.
 			const entries = {
 				bundle: './src/bundle.js',
 				main: './src/main.js',
-				functionality: './src/functionality.js',
-				advertising: './src/advertising.js',
-				analytics: './src/analytics.js',
+				functionality: {
+					import: './src/functionality.js',
+					dependOn: 'main',
+				},
+				advertising: {
+					import: './src/advertising.js',
+					dependOn: 'main',
+				},
+				analytics: {
+					import: './src/analytics.js',
+					dependOn: 'main',
+				},
 			};
 			return { ...entries };
 		},
@@ -120,7 +134,6 @@ module.exports = (env) => {
 					extractComments: false,
 				}),
 			],
-			concatenateModules: true,
 			splitChunks: {
 				chunks: 'async',
 				cacheGroups: {
@@ -191,11 +204,16 @@ module.exports = (env) => {
 									'babel-plugin-polyfill-corejs3',
 									{
 										method: 'usage-global',
+										// 9.7 KiB, pulled in by the circular-safe
+										// JSON.stringify in Utils/Logger. It only
+										// patches lone-surrogate escaping, which at
+										// worst renders a console header slightly
+										// differently on iOS Safari 17.
+										exclude: ['es.json.stringify'],
 										version: require('core-js/package.json')
 											.version,
 									},
 								],
-								['@babel/plugin-transform-runtime'],
 								// Removed '@babel/plugin-transform-react-jsx' to eliminate conflicts
 							],
 						},

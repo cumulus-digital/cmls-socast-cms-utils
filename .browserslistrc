@@ -1,3 +1,19 @@
+# Real audience, from browserslist-stats.json.
+# iOS Safari 17.5/17.6 is ~23% of traffic and is the effective floor.
+#
+# The exclusions below carry no measurable traffic in our stats but are pulled
+# in by "last 2 versions" + "not dead", and each drags the compile target far
+# enough back to force a much wider core-js polyfill surface:
+#   op_mini all  0.001%  proxy browser, cannot run these bundles anyway
+#   kaios        0.000%  2.5 is roughly Firefox 48
+#   and_qq       0.000%
+#   and_uc       0.010%
+#   baidu        0.000%
 > 5% in my stats,
 last 2 versions,
-not dead
+not dead,
+not op_mini all,
+not kaios > 0,
+not and_qq > 0,
+not and_uc > 0,
+not baidu > 0

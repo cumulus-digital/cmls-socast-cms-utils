@@ -29,7 +29,6 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 
 	if (!document.getElementById('onetrust-sdk-styles')) {
 		import(
-			/* webpackMode: "eager" */
 			/* webpackChunkName: "functionality/cmp/onetrust/styles" */
 			'./styles.scss'
 		).then((style) => {

@@ -4,6 +4,40 @@
 const namesToColors = {};
 
 /**
+ * Whether debug was forced on, via cookie, session storage or the query
+ * string. All three can be changed at runtime - by hand from the console, or
+ * by `history.replaceState` - so this cannot be resolved once and kept.
+ *
+ * It also cannot run on every log call: it reads `document.cookie` and runs
+ * two regexes, and a single page load makes well over a hundred log calls.
+ *
+ * Memoized for FORCE_DEBUG_TTL instead, so a burst of logging pays for one
+ * check while a change made from the console still takes effect a moment
+ * later.
+ */
+const FORCE_DEBUG_TTL = 1000;
+let forceDebugCache = false;
+let forceDebugCheckedAt = 0;
+const isDebugForced = () => {
+	const now = Date.now();
+	if (forceDebugCheckedAt && now - forceDebugCheckedAt < FORCE_DEBUG_TTL) {
+		return forceDebugCache;
+	}
+	forceDebugCheckedAt = now;
+	forceDebugCache = false;
+	try {
+		if (
+			/(1|true|yes)/i.test(window.sessionStorage.getItem('cmlsDebug')) ||
+			/cmlsDebug/i.test(window.document.cookie) ||
+			window.location.search.indexOf('cmlsDebug') >= 0
+		) {
+			forceDebugCache = true;
+		}
+	} catch (e) {}
+	return forceDebugCache;
+};
+
+/**
  * Generate a random color that's not red.
  * @returns string
  */
@@ -71,7 +105,19 @@ export default class Logger {
 		return new Date()?.toISOString() || new Date().toUTCString();
 	}
 
+	/**
+	 * Resolves the arguments a log method was called with.
+	 *
+	 * A single function argument is treated as a thunk and invoked here, so
+	 * call sites can defer building an expensive message until we know it will
+	 * actually be displayed:
+	 *
+	 *   log.debug(() => ['Slot rendered', slotData.summary]);
+	 */
 	resolveMessage(request) {
+		if (request.length === 1 && typeof request[0] === 'function') {
+			request = [].concat(request[0]());
+		}
 		let message = request;
 		let headerLength = 160;
 		if (
@@ -167,28 +213,36 @@ export default class Logger {
 
 	displayFooter() {
 		window.top.console.debug('TIMESTAMP:', this.timestamp());
-		window.top.console.trace();
+		// console.trace() captures a stack every time it is called, which is
+		// far too expensive for the info/warn/error lines that run on every
+		// page load. Only trace when someone is actually debugging.
+		if (this.debugMessagesEnabled()) {
+			window.top.console.trace();
+		}
 		window.top.console.groupEnd();
 	}
 
+	/**
+	 * `window._CMLS.debug` is read on every call; the cookie/storage/query
+	 * string checks behind `isDebugForced` are briefly memoized. Both can be
+	 * changed at runtime, so neither is resolved permanently.
+	 *
+	 * @returns {boolean}
+	 */
 	debugMessagesEnabled() {
-		let forceDebug = false;
-		try {
-			// support cmlsDebug in session storage or cookie
-			if (
-				/(1|true|yes)/i.test(
-					window.sessionStorage.getItem('cmlsDebug')
-				) ||
-				/cmlsDebug/i.test(window.document.cookie)
-			) {
-				forceDebug = true;
-			}
-			// support cmlsDebug in window.location.search
-			if (window.location.search.indexOf('cmlsDebug') >= 0) {
-				forceDebug = true;
-			}
-		} catch (e) {}
-		return window?._CMLS?.debug || forceDebug;
+		return !!(window?._CMLS?.debug || isDebugForced());
+	}
+
+	/**
+	 * Guard for call sites that would otherwise build an expensive argument
+	 * only to have it discarded:
+	 *
+	 *   if (log.isDebug) log.debug('Slot rendered', slotData.summary);
+	 *
+	 * @returns {boolean}
+	 */
+	get isDebug() {
+		return this.debugMessagesEnabled();
 	}
 
 	logMessage(type, message, headerLength = 160) {
@@ -233,6 +287,11 @@ export default class Logger {
 	}
 
 	debug(...request) {
+		// Bail before resolveMessage so a disabled debug call costs one boolean
+		// read rather than a message walk and a JSON.stringify.
+		if (!this.debugMessagesEnabled()) {
+			return;
+		}
 		let { message, headerLength } = this.resolveMessage(request);
 		this.logMessage('debug', message, headerLength);
 	}
