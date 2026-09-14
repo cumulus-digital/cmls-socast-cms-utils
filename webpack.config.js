@@ -246,7 +246,10 @@ module.exports = (env) => {
 			new webpack.DefinePlugin({
 				__BUILDDATE__: JSON.stringify(__BUILDDATE__),
 			}),
-			// Tag every script webpack injects for chunk loading.
+			// Tag every script webpack injects for chunk loading with data-ta-type="ignore"
+			// attribute so that TrustArc doesn't block it.
+			// WARNING: This means you CAN NOT load advertising or analytics bundles without
+			// the appropriate consent mode checks!!
 			{
 				apply(compiler) {
 					compiler.hooks.compilation.tap(
@@ -254,26 +257,23 @@ module.exports = (env) => {
 						(compilation) => {
 							webpack.runtime.LoadScriptRuntimeModule.getCompilationHooks(
 								compilation
-							).createScript.tap(
-								'ChunkScriptAttrs',
-								(source) => {
-									// Set the attribute immediately after
-									// createElement, before src is assigned, so
-									// the CMP never sees the script without it.
-									const create =
-										"script = document.createElement('script');";
-									if (!source.includes(create)) {
-										throw new Error(
-											'ChunkScriptAttrs: webpack script loader changed, data-ta-type not applied'
-										);
-									}
-									return source.replace(
-										create,
-										create +
-											'\nscript.setAttribute("data-ta-type", "ignore");'
+							).createScript.tap('ChunkScriptAttrs', (source) => {
+								// Set the attribute immediately after
+								// createElement, before src is assigned, so
+								// the CMP never sees the script without it.
+								const create =
+									"script = document.createElement('script');";
+								if (!source.includes(create)) {
+									throw new Error(
+										'ChunkScriptAttrs: webpack script loader changed, data-ta-type not applied'
 									);
 								}
-							);
+								return source.replace(
+									create,
+									create +
+										'\nscript.setAttribute("data-ta-type", "ignore");'
+								);
+							});
 						}
 					);
 				},
