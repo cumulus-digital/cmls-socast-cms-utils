@@ -256,9 +256,23 @@ module.exports = (env) => {
 								compilation
 							).createScript.tap(
 								'ChunkScriptAttrs',
-								(source) =>
-									source +
-									'\nscript.setAttribute("data-ta-type", "ignore");'
+								(source) => {
+									// Set the attribute immediately after
+									// createElement, before src is assigned, so
+									// the CMP never sees the script without it.
+									const create =
+										"script = document.createElement('script');";
+									if (!source.includes(create)) {
+										throw new Error(
+											'ChunkScriptAttrs: webpack script loader changed, data-ta-type not applied'
+										);
+									}
+									return source.replace(
+										create,
+										create +
+											'\nscript.setAttribute("data-ta-type", "ignore");'
+									);
+								}
 							);
 						}
 					);
