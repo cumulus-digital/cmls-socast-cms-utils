@@ -10,9 +10,13 @@
  *    fire time `config.defaultRefreshInMinutes` in the future. Once that time
  *    is reached the slot is refreshed and its timer is cleared.
  * 2) Force-refresh pass - slots that rendered empty and have not delivered a
- *    viewable impression since their last request are re-requested once the
- *    refresh interval has elapsed, provided they would be viewable if GPT
- *    had not collapsed them.
+ *    viewable impression since their last request are re-requested once
+ *    `config.refreshUndeliveredInMilliseconds` (capped at the refresh
+ *    interval) has elapsed since that request, provided they would be
+ *    viewable if GPT had not collapsed them. Each force refresh counts
+ *    against the slot, and a viewable impression resets the count. After 3
+ *    force refreshes without one, the slot waits the full refresh interval
+ *    between attempts instead.
  *
  * A slot is excluded from both passes when any of the following is true:
  * - its div id is in `window._CMLS.autoRefreshAdsExclusion`
@@ -132,6 +136,8 @@ class SlotData {
 	// force-refresh pass.
 	empty = true;
 
+	unfilledRefreshes = 0;
+
 	constructor(adRefresher, slot) {
 		if (!adRefresher) {
 			throw new Error('SlotData must be constructed with an AdRefresher');
@@ -163,6 +169,7 @@ class SlotData {
 			lastRendered: this.lastRendered,
 			lastViewableImpression: this.lastViewableImpression,
 			nextRefresh: this.nextRefresh,
+			unfilledRefreshes: this.unfilledRefreshes,
 		};
 	}
 
@@ -462,6 +469,26 @@ class SlotData {
 			return true;
 		}
 	}
+
+	increaseUnfilledRefreshCount() {
+		this.unfilledRefreshes++;
+		if (this.unfilledRefreshes > 3) {
+			this.adRefresher.log.warn(
+				`SlotData.increaseUnfilledRefreshCount: Unfilled refresh count for ${this.summary.elementId} has exceeded 3.`,
+				this.summary
+			);
+		}
+	}
+
+	decreaseUnfilledRefreshCount() {
+		if (this.unfilledRefreshes > 0) {
+			this.unfilledRefreshes--;
+		}
+	}
+
+	zeroUnfilledRefreshCount() {
+		this.unfilledRefreshes = 0;
+	}
 }
 
 /**
@@ -755,6 +782,7 @@ class AdRefresher {
 			return;
 		}
 		if (!slotData.nextRefresh) this.setSlotTimer(slot);
+		slotData.zeroUnfilledRefreshCount();
 	}
 
 	listenForSlotRequested(e) {
@@ -785,7 +813,7 @@ class AdRefresher {
 		if (slotData.canRefresh() && !slotData.nextRefresh) {
 			this.setSlotTimer(slot);
 		}
-		this.log.debug(() => ['Slot rendered', slotData.summary]);
+		this.log.debug(() => ['Slot rendered', slotData.summary, e]);
 	}
 
 	/**
@@ -978,11 +1006,18 @@ class AdRefresher {
 				return;
 			}
 
+			// If the slot has been unfilled 3 times in a row, use the stanard
+			// refresh time.
+			let unfilledRefreshTime = this.undeliveredRefreshTime;
+			if (slotData.unfilledRefreshes >= 3) {
+				unfilledRefreshTime = this.every;
+			}
+
 			// Require that the last request was at least
 			// config.refreshUndeliveredInMilliseconds ago
 			if (
 				now.getTime() - slotData.lastRequest.getTime() <=
-				this.undeliveredRefreshTime
+				unfilledRefreshTime
 			) {
 				return;
 			}
@@ -992,6 +1027,7 @@ class AdRefresher {
 				return;
 			}
 
+			slotData.increaseUnfilledRefreshCount();
 			forceRefreshSlots.push(slotData.slot);
 		});
 		// Div ids rather than full summaries: this line answers "which slots did

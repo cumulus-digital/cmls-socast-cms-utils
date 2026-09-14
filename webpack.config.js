@@ -35,6 +35,7 @@ module.exports = (env) => {
 			loader: require.resolve('style-loader'),
 			options: {
 				injectType: 'lazyAutoStyleTag',
+				attributes: { 'data-ta-type': 'ignore' },
 				insert: require.resolve('./src/utils/style-loader-insert.js'),
 			},
 		},
@@ -245,6 +246,24 @@ module.exports = (env) => {
 			new webpack.DefinePlugin({
 				__BUILDDATE__: JSON.stringify(__BUILDDATE__),
 			}),
+			// Tag every script webpack injects for chunk loading.
+			{
+				apply(compiler) {
+					compiler.hooks.compilation.tap(
+						'ChunkScriptAttrs',
+						(compilation) => {
+							webpack.runtime.LoadScriptRuntimeModule.getCompilationHooks(
+								compilation
+							).createScript.tap(
+								'ChunkScriptAttrs',
+								(source) =>
+									source +
+									'\nscript.setAttribute("data-ta-type", "ignore");'
+							);
+						}
+					);
+				},
+			},
 			new ModuleFederationPlugin({
 				runtime: 'cmls-socast-utils',
 				shared: [
