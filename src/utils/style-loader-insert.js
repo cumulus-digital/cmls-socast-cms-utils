@@ -1,4 +1,9 @@
 function insertIntoTarget(element, options) {
+	if (options && options.attributes) {
+		Object.entries(options.attributes).forEach(([name, value]) =>
+			element.setAttribute(name, value)
+		);
+	}
 	var parent =
 		options && options.target
 			? options.target
@@ -6,4 +11,4 @@ function insertIntoTarget(element, options) {
 	parent.appendChild(element);
 }
 
-module.exports = insertIntoTarget;
+export default insertIntoTarget;

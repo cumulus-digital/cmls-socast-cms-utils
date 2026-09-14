@@ -30,6 +30,17 @@ module.exports = (env) => {
 
 	const host = process.env.HOST || 'localhost';
 
+	const sassLoader = {
+		loader: require.resolve('sass-loader'),
+		options: {
+			sourceMap: !isProduction,
+			api: 'modern',
+			sassOptions: {
+				//importer: jsonInSassImporter(),
+			},
+		},
+	};
+
 	const cssLoaders = [
 		{
 			loader: require.resolve('style-loader'),
@@ -73,6 +84,7 @@ module.exports = (env) => {
 			},
 		},
 	];
+	const postcssLoader = cssLoaders[2];
 
 	return {
 		mode,
@@ -226,19 +238,22 @@ module.exports = (env) => {
 				},
 				{
 					test: /\.(sc|sa)ss$/,
-					use: [
-						...cssLoaders,
-						{
-							loader: require.resolve('sass-loader'),
-							options: {
-								sourceMap: !isProduction,
-								api: 'modern',
-								sassOptions: {
-									//importer: jsonInSassImporter(),
-								},
-							},
-						},
-					],
+					resourceQuery: { not: [/url/] },
+					use: [...cssLoaders, sassLoader],
+				},
+				// `import url from './styles.scss?url'` emits a compiled .css
+				// file and returns its URL, for loading with a <link> tag.
+				{
+					test: /\.(sc|sa)ss$/,
+					resourceQuery: /url/,
+					type: 'asset/resource',
+					generator: {
+						filename: (pathData) =>
+							pathData.filename
+								.replace(/^src\//, '')
+								.replace(/\.(sc|sa)ss(\?.*)?$/, '.[contenthash].css'),
+					},
+					use: [postcssLoader, sassLoader],
 				},
 			],
 		},

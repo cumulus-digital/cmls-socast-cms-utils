@@ -5,7 +5,8 @@
  */
 import { areSidewallsAllowed } from './shouldImport';
 import config from './config.json';
-//import './styles.scss';
+
+import styles from './styles.scss?url';
 
 ((window, undefined) => {
 	const { h, domReady, Logger } = window.__CMLSINTERNAL.libs;
@@ -97,13 +98,15 @@ import config from './config.json';
 					injectPointNode.style.position = 'relative';
 				}
 
-				import(
-					/* webpackChunkName: 'advertising/sidewalls/style' */
-					'./styles.scss'
-				).then((style) => {
-					if (style?.default?.use)
-						style.default.use({ target: injectPointNode });
-				});
+				const link = <link rel="stylesheet" href={styles} />;
+				injectPointNode.append(link);
+				// import(
+				// 	/* webpackChunkName: 'advertising/sidewalls/style' */
+				// 	'./styles.scss'
+				// ).then((style) => {
+				// 	if (style?.default?.use)
+				// 		style.default.use({ target: injectPointNode });
+				// });
 
 				const wrapper = (
 					<div

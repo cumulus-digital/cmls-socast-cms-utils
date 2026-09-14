@@ -1,5 +1,7 @@
 import config from './config.json';
 
+import styles from './styles.scss?url';
+
 const { h, Logger, domReady, waitFor } = window.__CMLSINTERNAL.libs;
 const { scriptName, nameSpace, version, defaultOptions } = config;
 const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
@@ -27,12 +29,21 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	log.debug('CMP Options', window._CMLS_CMP.oneTrustOptions);
 
 	if (!document.getElementById('trustarc-sdk-styles')) {
-		import(
-			/* webpackChunkName: "functionality/cmp/trustarc/styles" */
-			'./styles.scss'
-		).then((style) => {
-			style.default.use();
-		});
+		const link = (
+			<link
+				rel="stylesheet"
+				id="trustarc-sdk-styles"
+				data-ta-type="ignore"
+				href={styles}
+			/>
+		);
+		document.head.append(link);
+		// import(
+		// 	/* webpackPreload: true, webpackChunkName: "functionality/cmp/trustarc/styles" */
+		// 	'./styles.scss'
+		// ).then((style) => {
+		// 	style.default.use();
+		// });
 	}
 
 	const injectFooterLink = () => {

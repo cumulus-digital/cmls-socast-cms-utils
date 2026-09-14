@@ -44,7 +44,7 @@
 			} else if (typeof injectables[i] === 'string') {
 				log.debug('Importing injectable', i);
 				import(
-					/* webpackChunkName: 'advertising/paid-content/[request]' */
+					/* webpackChunkName: 'advertising/paid-content/[request]', webpackInclude: /\.js$/ */
 					`${injectables[i]}`
 				).then((injectable) => {
 					if (typeof injectable?.default === 'function') {

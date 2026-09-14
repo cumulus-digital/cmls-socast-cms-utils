@@ -1,3 +1,5 @@
+import styles from './styles.scss?url';
+
 export default () => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
 	const scriptName = 'PAID CONTENT / TOPICALFRUIT';
@@ -65,13 +67,20 @@ export default () => {
 		}
 		if (!document.querySelector(`script[src="${scrSrc}"]`)) {
 			contentContainer.append(scr);
-			import(
-				/* webpackChunkName: "advertising/paid-content/topical-fruit" */
-				'./styles.scss'
-			).then((style) => {
-				if (style?.default?.use)
-					style.default.use({ target: contentContainer });
-			});
+			const link = (
+				<link
+					rel="stylesheet"
+					href={styles}
+				/>
+			);
+			contentContainer.append(link);
+			// import(
+			// 	/* webpackChunkName: "advertising/paid-content/topical-fruit" */
+			// 	'./styles.scss'
+			// ).then((style) => {
+			// 	if (style?.default?.use)
+			// 		style.default.use({ target: contentContainer });
+			// });
 			injectedScript = true;
 		}
 		if (injectedDiv || injectedScript) {

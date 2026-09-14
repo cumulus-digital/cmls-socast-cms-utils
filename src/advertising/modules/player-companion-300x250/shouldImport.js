@@ -1,5 +1,7 @@
 import config from './config.json';
 
+import styles from './style.scss?url';
+
 const scriptName = `${config.scriptName} IMPORTER`;
 const nameSpace = `${config.nameSpace}Importer`;
 const version = '1.0';
@@ -31,16 +33,20 @@ export default () => {
 					</div>
 				);
 				w.document.body.append(div);
-				const style = import(
-					/* webpackChunkName: "advertising/companion-300x250/tag" */
-					'./style.scss'
-				).then((style) => {
-					if (style?.default?.use) {
-						style.default.use({
-							target: w.document.body,
-						});
-					}
-				});
+				const link = document.createElement('link');
+				link.setAttribute('rel', 'stylesheet');
+				link.setAttribute('href', styles);
+				w.document.head.append(link);
+				// const style = import(
+				// 	/* webpackChunkName: "advertising/companion-300x250/tag" */
+				// 	'./style.scss'
+				// ).then((style) => {
+				// 	if (style?.default?.use) {
+				// 		style.default.use({
+				// 			target: w.document.body,
+				// 		});
+				// 	}
+				// });
 				log.info('Injected 300x250 companion');
 			});
 		}

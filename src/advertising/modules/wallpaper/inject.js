@@ -1,5 +1,7 @@
 import config from './config.json';
 
+import styles from './style.scss?url';
+
 const log = new window.__CMLSINTERNAL.Logger(
 	`${config.scriptName} ${config.version}`
 );
@@ -96,16 +98,18 @@ const log = new window.__CMLSINTERNAL.Logger(
 			}
 
 			log.debug('Generating slot');
-			const style = import(
-				/* webpackChunkName: "advertising/wallpaper/oop" */
-				'./style.scss'
-			).then((style) => {
-				if (style?.default?.use) {
-					style.default.use({
-						target: this.context.document.body,
-					});
-				}
-			});
+			const link = <link rel="stylesheet" href={styles} />;
+			this.context.document.body.append(link);
+			// const style = import(
+			// 	/* webpackChunkName: "advertising/wallpaper/oop" */
+			// 	'./style.scss'
+			// ).then((style) => {
+			// 	if (style?.default?.use) {
+			// 		style.default.use({
+			// 			target: this.context.document.body,
+			// 		});
+			// 	}
+			// });
 
 			this.container = <div id={`${this.containerId}`} />;
 			this.slotDiv = <div id={`${this.divId}`} />;
