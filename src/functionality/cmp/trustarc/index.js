@@ -62,13 +62,20 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 				</li>
 			);
 		} else {
-			document.body.append(
+			let footerBanner = (
 				<div id="te-footer-msg">
 					<div class="inner">
 						<span id="teconsent"></span>
 					</div>
 				</div>
 			);
+
+			let footer = document.querySelector('#theFooter');
+			if (footer) {
+				footer.after(footerBanner);
+			} else {
+				document.body.append(footerBanner);
+			}
 		}
 	};
 
