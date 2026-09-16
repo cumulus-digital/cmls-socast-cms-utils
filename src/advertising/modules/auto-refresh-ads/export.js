@@ -1,39 +1,34 @@
 /**
  * Auto-refresh ads.
  *
- * Refreshes GPT ad slots on a per-slot timer, and separately re-requests
- * slots that came back empty.
+ * Two cadences, by what the slot is doing:
+ * - filled and viewable - `config.defaultRefreshInMinutes`, counted from the
+ *   viewable impression, so a creative is never replaced mid-impression
+ * - came back empty - a shorter `config.refreshUndeliveredInMilliseconds`,
+ *   counted from the request, since an unfilled slot has nothing to earn
  *
- * Two passes run on every tick (`config.tickInterval`):
+ * Either slows down when the slot stops delivering, and recovers on the signal
+ * it was failing: a fill clears the empty backoff, a viewable impression
+ * clears the viewability one.
  *
- * 1) Refresh pass - any slot that passes `SlotData.canRefresh()` is given a
- *    fire time `config.defaultRefreshInMinutes` in the future. Once that time
- *    is reached the slot is refreshed and its timer is cleared.
- * 2) Force-refresh pass - slots that rendered empty and have not delivered a
- *    viewable impression since their last request are re-requested once
- *    `config.refreshUndeliveredInMilliseconds` (capped at the refresh
- *    interval) has elapsed since that request, provided they would be
- *    viewable if GPT had not collapsed them. Each force refresh counts
- *    against the slot, and a viewable impression resets the count. After 3
- *    force refreshes without one, the slot waits the full refresh interval
- *    between attempts instead.
+ * One timer for the whole module, the `config.tickInterval` loop, and none
+ * per slot. A slot is due when `now - refreshCycleStart` exceeds its
+ * `minimumGap`, both derived on demand, so nothing can go stale when either
+ * changes. `SlotData` answers may-it-refresh (`canRefresh()`,
+ * `canForceRefresh()`) and is-it-due (`isDue()`), each rule documented on the
+ * member that answers it; `AdRefresher.tick()` collects what is due and
+ * refreshes it as one batch.
  *
- * A slot is excluded from both passes when any of the following is true:
- * - its div id is in `window._CMLS.autoRefreshAdsExclusion`
- * - it carries `never_refresh` targeting, or `refresh` targeting with a
- *   falsy value or the literal value `never_refresh`
- *
- * Slots carrying `always_refresh` targeting, or a `pos` value listed in
- * `config.ALWAYS_REFRESH_POS`, refresh regardless of viewability.
- *
- * Neither pass runs while the page is in a background tab, and time spent
- * hidden is added back to every armed timer, so a tab left open for an hour
- * does not come back and refresh every slot at once.
+ * Per-slot control is by targeting: `never_refresh`, or a falsy `refresh`,
+ * opts a slot out; `always_refresh` opts it past the viewability checks but
+ * not the timing. See the `neverRefresh` and `alwaysRefresh` getters.
  *
  * Public interface (all optional):
  * - `window.DISABLE_AUTO_REFRESH_ADS` - truthy disables the module
- * - `window._CMLS.autoRefreshAdsInterval` - refresh interval in minutes, or 0
- *   to disable. Read once, at construction, and floored at 30 seconds.
+ * - `window._CMLS.autoRefreshAdsInterval` - interval in minutes, or 0 to
+ *   disable; numeric strings accepted. The interval is read once at
+ *   construction and floored at 30 seconds, the 0 on every tick. Re-enabling
+ *   after a late 0 needs `enable()`.
  * - `window._CMLS.autoRefreshAdsExclusion` - array of div ids to skip. Read
  *   on every tick, so it can be appended to at any point in the page life.
  * - `window.__CMLSINTERNAL.autoRefreshAds` - the live AdRefresher instance,
@@ -51,12 +46,51 @@ const {
 	testForViewability,
 	viewabilityRatio,
 	fallbackSlotHeight,
+	unfilledRefresh,
+	viewlessRefresh,
+	returnFromHiddenDelayInMilliseconds,
 	tickInterval,
 	excludeFromForcedRefresh,
 } = config;
 let ALWAYS_REFRESH_POS = [];
 if (config.ALWAYS_REFRESH_POS) {
 	ALWAYS_REFRESH_POS = config.ALWAYS_REFRESH_POS;
+}
+
+// GAM throttles ad requests made less than 30 seconds apart. This is the hard
+// floor every computed gap is held to, and the guard against anyone lowering
+// `window._CMLS.autoRefreshAdsInterval` past what the policy allows.
+const GAM_MINIMUM_REFRESH_GAP = 30000;
+
+// Added to the floor to absorb network latency between our refresh call and
+// GAM receiving it, so a gap that is legal here is still legal there.
+const REFRESH_LATENCY_PAD = 5000;
+
+/**
+ * Reads `window._CMLS.autoRefreshAdsInterval`, in minutes.
+ *
+ * Parsed in one place so the "is it zero" and "is it a usable interval"
+ * questions cannot disagree about the same value. These globals are typically
+ * set from a CMS template, where a number can arrive as a string, so a numeric
+ * string is accepted as readily as a number - a literal `"0"` failing to
+ * disable refreshing is the kind of thing nobody notices.
+ *
+ * Anything that is not a usable number - absent, null, empty, non-numeric -
+ * reads as "not set" rather than as zero, since only an explicit 0 means
+ * disable.
+ *
+ * @returns {number|null} Minutes, or null when not set.
+ */
+function readIntervalOverride() {
+	const raw = window._CMLS?.autoRefreshAdsInterval;
+	if (typeof raw !== 'number' && typeof raw !== 'string') {
+		return null;
+	}
+	if (typeof raw === 'string' && raw.trim() === '') {
+		return null;
+	}
+	const minutes = Number(raw);
+	return Number.isFinite(minutes) ? minutes : null;
 }
 
 const { Logger } = window.__CMLSINTERNAL.libs;
@@ -104,11 +138,25 @@ window.__CMLSINTERNAL.clearAutoRefreshAdsExclusion = () => {
 /**
  * Per-slot bookkeeping for a single googletag.Slot.
  *
- * Holds the slot's refresh timer and the event timestamps the refresh
- * decisions are made from. Instances live in `AdRefresher.slots`, keyed by
+ * Owns both refresh questions - whether a slot may refresh, and whether it is
+ * due - along with the event timestamps those answers are derived from. It
+ * never triggers a refresh itself; `AdRefresher` collects due slots and
+ * refreshes them as one batch. Instances live in `AdRefresher.slots`, keyed by
  * `SlotData.generateDataId()`.
  */
 class SlotData {
+	/**
+	 * `canForceRefresh()` reasons worth surfacing in the log. Everything else
+	 * it can return - not due, off screen, delivering normally - is a slot
+	 * behaving as designed, and logging those would bury the ones that matter.
+	 */
+	static LOGGED_SKIP_REASONS = [
+		'notEmpty',
+		'notRequested',
+		'excluded',
+		'neverRefresh',
+	];
+
 	adRefresher = null;
 	slot = null;
 
@@ -126,9 +174,6 @@ class SlotData {
 	// computed on first read for slots that have not fired that event yet.
 	_viewable = null;
 
-	// When this slot is next due to refresh, or null if no timer is armed.
-	nextRefresh = null;
-
 	// Last computed value of the matching getter. Not used as a cache - the
 	// getters recompute every call so late targeting and exclusion-list
 	// changes take effect - but kept as an escape hatch for reading the last
@@ -141,7 +186,16 @@ class SlotData {
 	// force-refresh pass.
 	empty = true;
 
+	// Refreshes that came back without a creative. Reset by a fill, the signal
+	// it tracks - not by a viewable impression, or a slot that started filling
+	// again would stay penalised for a fill problem it no longer has.
 	unfilledRefreshes = 0;
+
+	// Refreshes of a *filled* creative that GPT never reported a viewable
+	// impression for. Reset by a viewable impression, the signal it tracks.
+	// Empty slots are counted by `unfilledRefreshes` instead, so the two never
+	// double-count the same refresh.
+	viewlessRefreshes = 0;
 
 	constructor(adRefresher, slot) {
 		if (!adRefresher) {
@@ -173,8 +227,10 @@ class SlotData {
 			lastResponse: this.lastResponse,
 			lastRendered: this.lastRendered,
 			lastViewableImpression: this.lastViewableImpression,
+			refreshCycleStart: this.refreshCycleStart,
 			nextRefresh: this.nextRefresh,
 			unfilledRefreshes: this.unfilledRefreshes,
+			viewlessRefreshes: this.viewlessRefreshes,
 		};
 	}
 
@@ -182,6 +238,10 @@ class SlotData {
 	 * Whether this slot refreshes regardless of viewability, either from
 	 * `always_refresh` targeting or from its `pos` appearing in
 	 * `config.ALWAYS_REFRESH_POS`.
+	 *
+	 * An escape hatch for slots that need to bypass our checks. It bypasses
+	 * the checks only - never the timing: `isDue()` and `minimumGap` still
+	 * apply, so an always-refresh slot cannot breach the request-rate floor.
 	 *
 	 * @returns {boolean}
 	 */
@@ -597,16 +657,16 @@ class SlotData {
 	}
 
 	/**
-	 * Whether the refresh pass should consider this slot on this tick.
+	 * Whether the refresh pass may consider this slot at all. Says nothing
+	 * about whether it is due - see `isDue()`.
 	 *
-	 * Note this is the gate for the normal refresh pass only; the
-	 * force-refresh pass in `AdRefresher.tick` applies its own conditions.
+	 * This is the gate for the normal refresh pass only; the force-refresh
+	 * pass has its own in `canForceRefresh()`.
 	 *
 	 * @returns {boolean}
 	 */
 	canRefresh() {
 		if (this.neverRefresh) {
-			this.nextRefresh = null;
 			return false;
 		}
 
@@ -614,43 +674,268 @@ class SlotData {
 			return true;
 		}
 
-		if (testForViewability && !this.viewable) {
-			/*
-			this.adRefresher.log.debug(
-				'SlotData.canRefresh: Slot is not viewable',
-				this.summary
-			);
-			*/
-			return false;
-		} else {
-			/*
-			this.adRefresher.log.debug(
-				'SlotData.canRefresh: Slot is viewable',
-				this.summary
-			);
-			*/
-			return true;
+		return !testForViewability || this.viewable;
+	}
+
+	/**
+	 * How long this slot must wait after a request before it may be requested
+	 * again.
+	 *
+	 * Every backoff that applies is resolved here and the longest one wins, so
+	 * a slot in more than one degraded state is slowed to its slowest rate
+	 * rather than whichever rate happens to be checked first. Both refresh
+	 * passes read this, which is what keeps them from disagreeing.
+	 *
+	 * - An empty slot uses the shorter undelivered gap, so a slot that failed
+	 *   to fill gets another chance sooner than a full refresh interval.
+	 * - `unfilledRefreshes` at the limit gives up on that shorter gap.
+	 * - `viewlessRefreshes` at the limit multiplies the interval, for a slot
+	 *   our geometry thinks is on screen and GPT does not.
+	 *
+	 * @returns {number} Milliseconds
+	 */
+	get minimumGap() {
+		const { every, undeliveredRefreshTime } = this.adRefresher;
+
+		let gap = this.empty ? undeliveredRefreshTime : every;
+
+		if (
+			unfilledRefresh?.limit &&
+			this.unfilledRefreshes >= unfilledRefresh.limit
+		) {
+			gap = Math.max(gap, every);
 		}
+
+		if (
+			viewlessRefresh?.limit &&
+			this.viewlessRefreshes >= viewlessRefresh.limit
+		) {
+			gap = Math.max(gap, every * (viewlessRefresh.backoff || 1));
+		}
+
+		return gap;
+	}
+
+	/**
+	 * The moment this slot's current refresh cycle started, or null if it has
+	 * never been requested.
+	 *
+	 * The viewable impression, when there is one for the creative currently in
+	 * the slot, otherwise the request itself.
+	 *
+	 * Counting from the impression rather than the request is what stops a slot
+	 * from being refreshed out from under an impression it is in the middle of
+	 * earning. GPT credits a viewable impression only after one *continuous*
+	 * second at 50%, while `slotVisibilityChanged` flips `viewable` the instant
+	 * the slot crosses that threshold. A below-fold slot has usually been due
+	 * for minutes by the time it is scrolled into view, so counting from the
+	 * request would refresh it on the very next tick - landing inside that
+	 * one-second window about half the time and discarding the creative before
+	 * ActiveView ever credits it. The served impression stays in the
+	 * denominator and never reaches the numerator.
+	 *
+	 * Falling back to `lastRequest` matters too: a slot that never earns a
+	 * viewable impression would otherwise never become due. It keeps refreshing
+	 * on the normal interval, and `viewlessRefreshes` is what slows it down.
+	 *
+	 * @returns {Date|null}
+	 */
+	get refreshCycleStart() {
+		if (!this.lastRequest) {
+			return null;
+		}
+		if (
+			this.lastViewableImpression &&
+			this.lastViewableImpression > this.lastRequest
+		) {
+			return this.lastViewableImpression;
+		}
+		return this.lastRequest;
+	}
+
+	/**
+	 * When this slot next becomes due, or null if it has never been requested.
+	 *
+	 * Derived rather than stored: the slot holds no fire time of its own, so
+	 * there is nothing to go stale when `minimumGap` or `refreshCycleStart`
+	 * changes underneath it. Exposed for logging and debugging.
+	 *
+	 * @returns {Date|null}
+	 */
+	get nextRefresh() {
+		const start = this.refreshCycleStart;
+		if (!start) {
+			return null;
+		}
+		return new Date(start.getTime() + this.minimumGap);
+	}
+
+	/**
+	 * Whether this slot's refresh cycle has run its course and it may be
+	 * requested again. Says nothing about whether it *should* be - see
+	 * `canRefresh()` and `canForceRefresh()`.
+	 *
+	 * Measured from `refreshCycleStart`, which is never earlier than
+	 * `lastRequest`, so the gap between two actual ad requests is always at
+	 * least `minimumGap` and usually longer. The request-rate floor therefore
+	 * gets more conservative here, never less.
+	 *
+	 * @param now Date
+	 * @returns {boolean}
+	 */
+	isDue(now = new Date()) {
+		const start = this.refreshCycleStart;
+		if (!start) {
+			return false;
+		}
+		return now.getTime() - start.getTime() >= this.minimumGap;
+	}
+
+	/**
+	 * Whether GPT has reported a viewable impression on the creative that is
+	 * in this slot right now.
+	 *
+	 * Compared against `lastRequest` rather than merely checking for absence,
+	 * so a slot that was viewable on an earlier creative but not on this one
+	 * still answers false.
+	 *
+	 * @returns {boolean}
+	 */
+	hasViewableImpressionSinceRequest() {
+		if (!this.lastViewableImpression || !this.lastRequest) {
+			return false;
+		}
+		return this.lastViewableImpression >= this.lastRequest;
+	}
+
+	/**
+	 * Whether the force-refresh pass should re-request this slot, and if not,
+	 * why.
+	 *
+	 * Returning a reason rather than a bare false lets the caller bucket the
+	 * skips for logging without knowing the conditions. Reasons in
+	 * `SlotData.LOGGED_SKIP_REASONS` are worth investigating; the rest are a
+	 * slot behaving exactly as designed.
+	 *
+	 * @param now Date
+	 * @returns {string|null} null when the slot should be force-refreshed.
+	 */
+	canForceRefresh(now = new Date()) {
+		if (!this.empty) {
+			return 'notEmpty';
+		}
+		if (!this.lastRequest) {
+			return 'notRequested';
+		}
+		if (excludeFromForcedRefresh.includes(this.slot.getSlotElementId())) {
+			return 'excluded';
+		}
+		if (this.neverRefresh) {
+			return 'neverRefresh';
+		}
+
+		// A viewable impression since the last request means the slot is
+		// delivering after all. Compared against `lastRequest` rather than
+		// merely checking for absence, so a slot that filled once and later
+		// went empty is still picked up.
+		if (this.hasViewableImpressionSinceRequest()) {
+			return 'recentlyViewable';
+		}
+		if (!this.isDue(now)) {
+			return 'notDue';
+		}
+
+		// Only ever force-refresh slots that would be on screen. Revealed,
+		// because GPT has collapsed the div and it has no box to measure.
+		//
+		// Deliberately last: revealing writes to el.style and then reads
+		// getBoundingClientRect(), which forces a synchronous reflow. Keeping it
+		// behind isDue() means that cost is paid only for slots actually due,
+		// not for every empty slot on every tick.
+		if (!this.testViewability(true)) {
+			return 'offScreen';
+		}
+
+		return null;
+	}
+
+	/**
+	 * Marks the slot as having a refresh pending, in targeting only.
+	 *
+	 * Written the first time a slot is eligible rather than on every tick, so
+	 * GAM sees the same `refresh: set` transition it saw when this was stamped
+	 * by an arming step.
+	 */
+	markRefreshPending() {
+		if (this.refreshKey.includes(AdRefresher.TARGET_SET)) {
+			return;
+		}
+		this.refreshKey = AdRefresher.TARGET_SET;
+	}
+
+	/**
+	 * Records that this slot has just been re-requested.
+	 *
+	 * Called for every slot in a refresh batch, before GPT is asked to fetch.
+	 * Stamping `lastRequest` is what starts the next cycle, so this is also
+	 * the last moment at which the outgoing creative can be judged.
+	 */
+	onRefreshed() {
+		// Both counters are incremented here, the one place a refresh is
+		// actually spent, so they cannot drift apart. They are mutually
+		// exclusive by construction - a slot is either empty or it is not - and
+		// an empty slot cannot earn a viewable impression to be judged on.
+		if (this.empty) {
+			this.increaseUnfilledRefreshCount();
+		} else if (!this.hasViewableImpressionSinceRequest()) {
+			// A filled creative that never earned a viewable impression is one
+			// our geometry believes is on screen and GPT does not.
+			this.increaseViewlessRefreshCount();
+		}
+
+		// Targeting moves from "pending" to "has refreshed". Slots that never
+		// carried the key are left alone.
+		const currentRefreshKey = this.refreshKey;
+		if (
+			currentRefreshKey.includes(AdRefresher.TARGET_SET) ||
+			currentRefreshKey.includes(AdRefresher.TARGET_TRUE)
+		) {
+			this.refreshKey = AdRefresher.TARGET_TRUE;
+		}
+
+		this.lastRequest = new Date();
 	}
 
 	increaseUnfilledRefreshCount() {
 		this.unfilledRefreshes++;
-		if (this.unfilledRefreshes > 3) {
+		// Warns once, on the refresh that crosses the limit, rather than on
+		// every refresh after it.
+		if (this.unfilledRefreshes === unfilledRefresh?.limit) {
 			this.adRefresher.log.warn(
-				`SlotData.increaseUnfilledRefreshCount: Unfilled refresh count for ${this.summary.elementId} has exceeded 3.`,
+				`SlotData.increaseUnfilledRefreshCount: ${this.summary.elementId} has come back unfilled ${this.unfilledRefreshes} times, backing off.`,
 				this.summary
 			);
-		}
-	}
-
-	decreaseUnfilledRefreshCount() {
-		if (this.unfilledRefreshes > 0) {
-			this.unfilledRefreshes--;
 		}
 	}
 
 	zeroUnfilledRefreshCount() {
 		this.unfilledRefreshes = 0;
+	}
+
+	increaseViewlessRefreshCount() {
+		this.viewlessRefreshes++;
+		// Warns once, on the refresh that crosses the limit, rather than on
+		// every refresh after it.
+		if (this.viewlessRefreshes === viewlessRefresh?.limit) {
+			this.adRefresher.log.warn(
+				`SlotData.increaseViewlessRefreshCount: ${this.summary.elementId} has refreshed ${this.viewlessRefreshes} times without a viewable impression, backing off.`,
+				this.summary
+			);
+		}
+	}
+
+	zeroViewlessRefreshCount() {
+		this.viewlessRefreshes = 0;
 	}
 }
 
@@ -710,15 +995,12 @@ class AdRefresher {
 	// logged on change rather than on a timer.
 	lastNotForcedRefresh = null;
 
-	// When the page was last hidden, or null while it is visible. Used to push
-	// armed refresh timers forward by however long the tab spends backgrounded.
-	hiddenSince = null;
+	// When the page most recently became visible, or null while it is hidden.
+	// Tracked in `tick()` rather than from a visibilitychange listener, since
+	// the tick already runs often enough to spot the transition.
+	visibleSince = null;
 
 	boundListeners = {};
-
-	// Held separately from `boundListeners`: those are googletag events removed
-	// through the adTag interface, this one is a DOM event on `document`.
-	boundVisibilityListener = null;
 
 	/**
 	 * @param milliseconds Refresh interval. Overridden by
@@ -726,25 +1008,34 @@ class AdRefresher {
 	 *                     expressed in minutes.
 	 */
 	constructor(milliseconds = defaultRefreshInMinutes * 60000) {
-		// Allows a global override of the refresh time
-		if (window?._CMLS?.autoRefreshAdsInterval > 0) {
-			this.every = window._CMLS.autoRefreshAdsInterval * 60000;
+		// Allows a global override of the refresh time. A zero is handled by
+		// checkGlobalConditions() as "disable", not as an interval.
+		const overrideMinutes = readIntervalOverride();
+		if (overrideMinutes > 0) {
+			this.every = overrideMinutes * 60000;
 		} else {
 			this.every = milliseconds;
 		}
 
-		// Floor the interval. Anything at or below the tick rate would refresh
-		// on every tick, so a mistyped override cannot run away.
-		if (this.every < 30000) {
+		// Floor the interval, so a mistyped override cannot put us under the
+		// policy minimum.
+		if (this.every < GAM_MINIMUM_REFRESH_GAP) {
 			this.log.warn(
-				`Refresh interval of ${this.every}ms is below the 30s floor, clamping.`
+				`Refresh interval of ${this.every}ms is below the ${GAM_MINIMUM_REFRESH_GAP / 1000}s floor, clamping.`
 			);
-			this.every = 30000;
+			this.every = GAM_MINIMUM_REFRESH_GAP;
 		}
 
-		// Undelivered refresh time cannot be longer than the refresh interval
+		// Undelivered slots should not wait longer than a normal refresh. Held
+		// above the padded floor even so: `refreshUndeliveredInMilliseconds`
+		// sits deliberately over the policy minimum to absorb latency, and
+		// capping it to an `every` that has just been clamped would strip that
+		// margin on the one path that most needs it.
 		if (this.undeliveredRefreshTime > this.every) {
-			this.undeliveredRefreshTime = this.every;
+			this.undeliveredRefreshTime = Math.max(
+				this.every,
+				GAM_MINIMUM_REFRESH_GAP + REFRESH_LATENCY_PAD
+			);
 		}
 
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
@@ -771,18 +1062,6 @@ class AdRefresher {
 				slotData.lastViewableImpression = new Date();
 				slotData.empty = false;
 			}
-
-			// Check for always-refresh slots and set their timer immediately.
-			// Gated on lastRequest so we never stamp refresh targeting onto a
-			// slot's initial request - the tick skips unrequested slots anyway,
-			// and the slotRequested listener arms them once they are requested.
-			if (slotData.alwaysRefresh && slotData.lastRequest) {
-				this.log.debug(
-					`Slot ${slot.getSlotElementId()} is set to always refresh. Setting timer immediately`,
-					slotData.summary
-				);
-				this.setSlotTimer(slot);
-			}
 		});
 
 		this.log.debug('Setting up listeners...');
@@ -801,23 +1080,9 @@ class AdRefresher {
 			adTag.addListener(e, fn)
 		);
 
-		this.boundVisibilityListener =
-			this.listenForVisibilityChange.bind(this);
-		document.addEventListener(
-			'visibilitychange',
-			this.boundVisibilityListener
-		);
-		// The page may already be in a background tab by the time we load, in
-		// which case no visibilitychange fires until it is brought forward.
-		if (document.hidden) {
-			this.hiddenSince = new Date();
-		}
-
 		this.initInterval();
 
 		this.log.info('Auto-Refresh-Ads is running.');
-
-		return this;
 	}
 
 	clearInterval() {
@@ -861,7 +1126,9 @@ class AdRefresher {
 			return DISABLED;
 		}
 
-		if (window._CMLS?.autoRefreshAdsInterval === 0) {
+		// Re-read on every call rather than cached, so on-page code can disable
+		// refreshing at any point in the page life.
+		if (readIntervalOverride() === 0) {
 			this.log.warn(
 				'Auto refresh ads disabled by window._CMLS.autoRefreshAdsInterval = 0'
 			);
@@ -927,8 +1194,8 @@ class AdRefresher {
 	}
 
 	/**
-	 * A generic googletag.events.Event listener, used solely to ensure
-	 * that a lastRequest timestamp is set.
+	 * A generic googletag.events.Event listener. Ensures a lastRequest
+	 * timestamp exists, and stamps lastResponse for slotResponseReceived.
 	 *
 	 * Logs the div id rather than a full summary: the listeners that actually
 	 * act on an event already log the slot's state, and these two fire on
@@ -951,7 +1218,8 @@ class AdRefresher {
 
 	/**
 	 * A viewable impression is the signal that a slot is genuinely on screen
-	 * and filled, so it arms the refresh timer if nothing has armed it yet.
+	 * and delivering, so it clears both backoff counters - a slot that is being
+	 * seen has neither a fill problem nor a viewability one.
 	 */
 	listenForViewableImpressions(e) {
 		const slot = e.slot;
@@ -964,15 +1232,14 @@ class AdRefresher {
 		if (slotData.neverRefresh) {
 			return;
 		}
-		if (!slotData.nextRefresh) this.setSlotTimer(slot);
 		slotData.zeroUnfilledRefreshCount();
+		slotData.zeroViewlessRefreshCount();
 	}
 
 	listenForSlotRequested(e) {
 		const slot = e.slot;
 		let slotData = this.setSlotData(slot);
 		slotData.lastRequest = new Date();
-		if (slotData.nextRefresh) this.setSlotTimer(slot);
 		this.log.debug(() => ['Slot requested', slotData.summary]);
 	}
 
@@ -992,9 +1259,13 @@ class AdRefresher {
 			slotData.empty = true;
 		} else {
 			slotData.empty = false;
-		}
-		if (slotData.canRefresh() && !slotData.nextRefresh) {
-			this.setSlotTimer(slot);
+			// Each counter resets on the signal it actually tracks. A fill is
+			// what `unfilledRefreshes` was counting the absence of, so it
+			// clears here rather than waiting on a viewable impression - a
+			// slot that fills but sits below the fold has a viewability
+			// problem, not a fill problem, and `viewlessRefreshes` is what
+			// should be holding it.
+			slotData.zeroUnfilledRefreshCount();
 		}
 		this.log.debug(() => ['Slot rendered', slotData.summary, e]);
 	}
@@ -1018,94 +1289,9 @@ class AdRefresher {
 	}
 
 	/**
-	 * Keeps refresh timers honest across a backgrounded tab.
-	 *
-	 * Refresh timers are wall-clock, and nothing in a hidden tab can record a
-	 * viewable impression. Left alone, a tab parked in the background would
-	 * come back with every armed timer long expired and refresh the whole page
-	 * at once - a burst of requests aimed at a reader who is still scrolling.
-	 * Time spent hidden is added back to every armed timer instead, so each
-	 * slot still gets a full interval of foreground time before it refreshes.
-	 *
-	 * Timers are only adjusted on the way back to visible, so the arithmetic
-	 * happens once per background stint rather than once per tick.
-	 */
-	listenForVisibilityChange() {
-		if (document.hidden) {
-			if (!this.hiddenSince) {
-				this.hiddenSince = new Date();
-			}
-			return;
-		}
-
-		if (!this.hiddenSince) {
-			return;
-		}
-
-		const hiddenFor = Date.now() - this.hiddenSince.getTime();
-		this.hiddenSince = null;
-
-		if (hiddenFor <= 0) {
-			return;
-		}
-
-		this.slots.forEach((slotData) => {
-			if (!slotData.nextRefresh) return;
-			slotData.nextRefresh = new Date(
-				slotData.nextRefresh.getTime() + hiddenFor
-			);
-		});
-
-		this.log.debug(
-			`Page was hidden for ${Math.round(hiddenFor / 1000)}s, armed refresh timers pushed forward to match.`
-		);
-	}
-
-	/**
-	 * Arms the slot's refresh timer and marks it as pending in targeting.
-	 *
-	 * @param slot googletag.Slot
-	 * @param fireTime When to refresh. Defaults to `this.every` from now.
-	 */
-	setSlotTimer(slot, fireTime = null) {
-		const slotData = this.getSlotData(slot);
-
-		const now = new Date();
-
-		// Round timer to seconds
-		now.setSeconds(
-			now.getSeconds() + Math.ceil(now.getMilliseconds() / 1000)
-		);
-		now.setMilliseconds(0);
-
-		if (fireTime === null) {
-			fireTime = new Date(now.getTime() + this.every);
-		}
-
-		slotData.refreshKey = AdRefresher.TARGET_SET;
-		slotData.nextRefresh = fireTime;
-	}
-
-	/**
-	 * Disarms the slot's refresh timer and moves its targeting from "pending"
-	 * to "has refreshed". Slots that never carried the key are left alone.
-	 */
-	deleteSlotTimer(slot) {
-		const slotData = this.getSlotData(slot);
-		slotData.nextRefresh = null;
-		const currentRefreshKey = slotData.refreshKey;
-		if (
-			currentRefreshKey.includes(AdRefresher.TARGET_SET) ||
-			currentRefreshKey.includes(AdRefresher.TARGET_TRUE)
-		) {
-			slotData.refreshKey = AdRefresher.TARGET_TRUE;
-		}
-	}
-
-	/**
-	 * Ticks run every second but are only logged every `tickLogInterval`, to
-	 * keep the console usable. Evaluate this once per tick and reuse the
-	 * result, since the first log updates `lastTickLogged`.
+	 * Ticks run every `config.tickInterval` but are only logged every
+	 * `tickLogInterval`, to keep the console usable. Evaluate this once per tick
+	 * and reuse the result, since the first log updates `lastTickLogged`.
 	 *
 	 * @returns {boolean}
 	 */
@@ -1117,7 +1303,37 @@ class AdRefresher {
 	}
 
 	/**
+	 * Whether the page has been visible long enough to start refreshing.
+	 *
+	 * A tab coming back from the background may still be settling - layout,
+	 * scroll restoration, lazy content - so refreshing on the very first tick
+	 * risks measuring viewability against a page that is about to move. GAM
+	 * only asks that requests be at least 30s apart, not that a slot has been
+	 * viewable for any length of time, so this is a short settle pause rather
+	 * than a viewability guard.
+	 *
+	 * Also holds for the same delay on first load, where nothing can be due
+	 * yet anyway.
+	 *
+	 * @returns {boolean}
+	 */
+	hasSettled() {
+		if (!this.visibleSince) {
+			return false;
+		}
+		return (
+			Date.now() - this.visibleSince >=
+			returnFromHiddenDelayInMilliseconds
+		);
+	}
+
+	/**
 	 * The refresh cycle. Runs every `config.tickInterval` milliseconds.
+	 *
+	 * Eligibility and timing both belong to `SlotData`; this drives the loop
+	 * and batches the result. Collecting due slots and refreshing them in one
+	 * `adTag.refresh()` call matters - GPT turns a batch into a single ad
+	 * request, so refreshing slots one at a time would cost fill and latency.
 	 */
 	tick() {
 		if (this.isDestroyed()) return;
@@ -1135,10 +1351,17 @@ class AdRefresher {
 		}
 
 		// A slot in a hidden tab cannot record a viewable impression, so a
-		// refresh here would only spend one. Both passes below are skipped
-		// wholesale, including the always-refresh slots that otherwise bypass
-		// the viewability check. `listenForVisibilityChange` covers the gap.
+		// refresh here would only spend one. Both passes are skipped wholesale,
+		// including always-refresh slots, which otherwise bypass the
+		// viewability check entirely.
 		if (document.hidden) {
+			this.visibleSince = null;
+			return;
+		}
+		if (!this.visibleSince) {
+			this.visibleSince = Date.now();
+		}
+		if (!this.hasSettled()) {
 			return;
 		}
 
@@ -1155,9 +1378,9 @@ class AdRefresher {
 			this.lastTickLogged = now;
 		}
 
-		// Refresh pass. Arms a timer on any slot eligible to refresh, and
-		// collects the ones whose timer has come due. Doubles as our garbage
-		// collection: slots whose div has left the DOM are dropped here.
+		// Refresh pass. Marks every eligible slot as pending in targeting and
+		// collects the ones that are due. Doubles as our garbage collection:
+		// slots whose div has left the DOM are dropped here.
 		const refreshSlots = [];
 		this.slots.forEach((slotData) => {
 			if (
@@ -1174,11 +1397,8 @@ class AdRefresher {
 			if (!slotData.canRefresh()) {
 				return;
 			}
-			if (!slotData.nextRefresh) {
-				this.setSlotTimer(slotData.slot);
-				return;
-			}
-			if (now >= slotData.nextRefresh) {
+			slotData.markRefreshPending();
+			if (slotData.isDue(now)) {
 				refreshSlots.push(slotData.slot);
 			}
 		});
@@ -1188,104 +1408,45 @@ class AdRefresher {
 		}
 
 		// Force-refresh pass. Slots that came back empty never fire an
-		// impressionViewable, and GPT has collapsed the div, which makes them
-		// unviewable by definition - so the refresh pass above can never arm
-		// them. Give them another request once the refresh interval has
+		// impressionViewable, and GPT has collapsed the div, so the pass above
+		// can never consider them. Give them another request once their gap has
 		// elapsed, as long as they would be on screen if not collapsed.
 		const forceRefreshSlots = [];
 
 		// Why a slot was passed over, collected so logging ticks emit one line
-		// for the whole pass rather than one per slot. Only tracks the reasons
-		// worth investigating - a slot skipped because it is not yet due, was
-		// already refreshed above, or is off screen is behaving as designed.
-		const notForcedRefreshSlots = {
-			notEmpty: [],
-			notRequested: [],
-			excluded: [],
-			neverRefresh: [],
-		};
+		// for the whole pass rather than one per slot. Only the reasons worth
+		// investigating are kept; see `SlotData.LOGGED_SKIP_REASONS`.
+		const notForcedRefreshSlots = {};
 		this.slots.forEach((slotData) => {
-			if (!slotData.empty) {
-				notForcedRefreshSlots.notEmpty.push(slotData);
-				return;
-			}
-			if (!slotData.lastRequest) {
-				notForcedRefreshSlots.notRequested.push(slotData);
-				return;
-			}
 			if (refreshSlots.includes(slotData.slot)) {
 				// Already refreshed by the pass above
 				return;
 			}
-			if (
-				excludeFromForcedRefresh.includes(
-					slotData.slot.getSlotElementId()
-				)
-			) {
-				notForcedRefreshSlots.excluded.push(slotData);
+
+			const reason = slotData.canForceRefresh(now);
+			if (reason === null) {
+				forceRefreshSlots.push(slotData.slot);
 				return;
 			}
-			if (slotData.neverRefresh) {
-				notForcedRefreshSlots.neverRefresh.push(slotData);
+			if (!SlotData.LOGGED_SKIP_REASONS.includes(reason)) {
 				return;
 			}
-
-			// Require that no viewable impression has landed since the last
-			// request. Compared against lastRequest rather than merely checking
-			// for absence, so a slot that filled once and later went empty is
-			// still picked up here.
-			if (
-				slotData.lastViewableImpression &&
-				slotData.lastViewableImpression >= slotData.lastRequest
-			) {
-				return;
-			}
-
-			// If the slot has been unfilled 3 times in a row, use the stanard
-			// refresh time.
-			let unfilledRefreshTime = this.undeliveredRefreshTime;
-			if (slotData.unfilledRefreshes >= 3) {
-				unfilledRefreshTime = this.every;
-			}
-
-			// Require that the last request was at least
-			// config.refreshUndeliveredInMilliseconds ago
-			if (
-				now.getTime() - slotData.lastRequest.getTime() <=
-				unfilledRefreshTime
-			) {
-				return;
-			}
-
-			// Only ever force-refresh slots that would be on screen
-			if (!SlotData.testViewability(slotData.slot, true)) {
-				return;
-			}
-
-			slotData.increaseUnfilledRefreshCount();
-			forceRefreshSlots.push(slotData.slot);
-		});
-		// Div ids rather than full summaries: this line answers "which slots did
-		// we pass over, and why", and the per-event listeners already log each
-		// slot's full state.
-		const notForcedRefreshSlotsSummary = {};
-		let notForcedRefreshCount = 0;
-
-		for (const [reason, slots] of Object.entries(notForcedRefreshSlots)) {
-			if (!slots.length) continue;
-			notForcedRefreshSlotsSummary[reason] = slots.map((slotData) =>
+			notForcedRefreshSlots[reason] = notForcedRefreshSlots[reason] || [];
+			notForcedRefreshSlots[reason].push(
 				slotData.slot.getSlotElementId()
 			);
-			notForcedRefreshCount += slots.length;
+		});
+
+		let notForcedRefreshCount = 0;
+		for (const ids of Object.values(notForcedRefreshSlots)) {
+			notForcedRefreshCount += ids.length;
 		}
 
 		// Logged on change rather than on the tick-log timer: these buckets only
 		// move on slot events, so a transition is the only thing worth seeing.
 		// Recorded unconditionally so an empty tick still counts as a change and
 		// the same skip list is reported again if it returns.
-		const notForcedRefreshKey = JSON.stringify(
-			notForcedRefreshSlotsSummary
-		);
+		const notForcedRefreshKey = JSON.stringify(notForcedRefreshSlots);
 		const notForcedRefreshChanged =
 			notForcedRefreshKey !== this.lastNotForcedRefresh;
 		this.lastNotForcedRefresh = notForcedRefreshKey;
@@ -1293,7 +1454,7 @@ class AdRefresher {
 		if (notForcedRefreshCount && notForcedRefreshChanged) {
 			this.log.debug(
 				`Force-refresh check skips ${notForcedRefreshCount} slots:`,
-				notForcedRefreshSlotsSummary
+				notForcedRefreshSlots
 			);
 		}
 		if (forceRefreshSlots.length) {
@@ -1321,12 +1482,7 @@ class AdRefresher {
 			new Date().toLocaleString(),
 			slots.map((slot) => this.getSlotData(slot).summary)
 		);
-		slots.forEach((slot) => {
-			this.deleteSlotTimer(slot);
-			this.setSlotData(slot, {
-				lastRequest: new Date(),
-			});
-		});
+		slots.forEach((slot) => this.getSlotData(slot).onRefreshed());
 		window.__CMLSINTERNAL.adTag.refresh(slots);
 	}
 
@@ -1342,7 +1498,8 @@ class AdRefresher {
 
 	/**
 	 * Stops refreshing but leaves the interval running, so `unpause()` resumes
-	 * immediately. Timers already armed keep their fire times.
+	 * immediately. Slots keep their timestamps, so anything that came due while
+	 * paused refreshes on the first tick after resuming.
 	 */
 	pause() {
 		this.throwIfDestroyed();
@@ -1397,14 +1554,6 @@ class AdRefresher {
 		Object.entries(this.boundListeners).forEach(([e, fn]) =>
 			adTag.removeListener(e, fn)
 		);
-
-		if (this.boundVisibilityListener) {
-			document.removeEventListener(
-				'visibilitychange',
-				this.boundVisibilityListener
-			);
-			this.boundVisibilityListener = null;
-		}
 	}
 }
 

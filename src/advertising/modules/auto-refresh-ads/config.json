@@ -1,10 +1,13 @@
 {
 	"scriptName": "AUTO REFRESH ADS",
 	"nameSpace": "autoRefreshAds",
-	"version": "0.8",
+	"version": "0.11",
 
 	"defaultRefreshInMinutes": 1,
 	"refreshUndeliveredInMilliseconds": 35000,
+
+	"_c_returnFromHiddenDelayInMilliseconds": "How long to let the page settle after returning from a background tab before refreshing anything. GAM only requires 30s between requests, not 30s of viewability, so a burst on return is allowed - this is a short pause to let layout and scroll position settle, not a viewability guard.",
+	"returnFromHiddenDelayInMilliseconds": 2000,
 
 	"testForViewability": true,
 	"viewabilityRatio": 0.5,
@@ -14,6 +17,17 @@
 		"matchMedia": "only screen and (max-width: 760px)",
 		"matched": 50,
 		"default": 90
+	},
+
+	"unfilledRefresh": {
+		"_c": "Slots that keep coming back empty stop using the shorter `refreshUndeliveredInMilliseconds` gap after `limit` consecutive unfilled refreshes, and wait the full refresh interval instead. A viewable impression resets the count.",
+		"limit": 3
+	},
+
+	"viewlessRefresh": {
+		"_c": "Backs off slots that keep refreshing filled creatives without GPT ever reporting a viewable impression - typically obscured by a sticky header or overlay, which the geometric test cannot see. After `limit` such refreshes the slot's interval is multiplied by `backoff` until a viewable impression resets the count. Set to null to disable.",
+		"limit": 3,
+		"backoff": 2
 	},
 
 	"tickInterval": 2000,
