@@ -1233,20 +1233,17 @@ class AdRefresher {
 			throw new Error('setSlotData must be passed a googletag.Slot');
 		}
 		let newSlot = this.getSlotData(slot);
-		if (!newSlot) {
-			this.log.debug(
-				`Creating slot data for ${SlotData.generateDataId(slot)}`,
-				newData
-			);
+		const creating = !newSlot;
+		if (creating) {
 			newSlot = new SlotData(this, slot);
-		} else {
-			this.log.debug(
-				`Setting slot data for ${newSlot.id}`,
-				newData.summary
-			);
 		}
 		Object.assign(newSlot, newData);
 		this.slots.set(newSlot.id, newSlot);
+		this.log.debug(() => [
+			`${creating ? 'Creating' : 'Setting'} slot data for ${newSlot.id}`,
+			newSlot.summary,
+			newData,
+		]);
 		return this.getSlotData(slot);
 	}
 
