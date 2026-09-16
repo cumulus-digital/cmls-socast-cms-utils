@@ -1240,7 +1240,10 @@ class AdRefresher {
 			);
 			newSlot = new SlotData(this, slot);
 		} else {
-			this.log.debug(`Setting slot data for ${newSlot.id}`, newData);
+			this.log.debug(
+				`Setting slot data for ${newSlot.id}`,
+				newData.summary
+			);
 		}
 		Object.assign(newSlot, newData);
 		this.slots.set(newSlot.id, newSlot);
