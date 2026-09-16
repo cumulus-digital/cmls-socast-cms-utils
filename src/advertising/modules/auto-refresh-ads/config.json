@@ -1,7 +1,7 @@
 {
 	"scriptName": "AUTO REFRESH ADS",
 	"nameSpace": "autoRefreshAds",
-	"version": "0.11",
+	"version": "0.12",
 
 	"defaultRefreshInMinutes": 1,
 	"refreshUndeliveredInMilliseconds": 35000,
@@ -11,6 +11,12 @@
 
 	"testForViewability": true,
 	"viewabilityRatio": 0.5,
+
+	"largeAdViewability": {
+		"_c": "GAM counts a large display ad as viewable at 30% rather than 50%, per the MRC large-ad threshold. Applies from 242500px of creative area - exactly 970x250, the smallest common size that qualifies. Note a 300x600 cube is 180000px and does NOT qualify. Set to null to use viewabilityRatio for every size.",
+		"minimumArea": 242500,
+		"ratio": 0.3
+	},
 
 	"fallbackSlotHeight": {
 		"_c": "Assumed creative height in px for slots that report no size of their own (out-of-page, fluid). Keeps a collapsed slot sitting near the fold from passing the viewability test. Set to null to fall back to bare viewport intersection instead.",

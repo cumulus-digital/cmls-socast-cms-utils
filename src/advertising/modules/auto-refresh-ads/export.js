@@ -45,6 +45,7 @@ const {
 	defaultRefreshInMinutes,
 	testForViewability,
 	viewabilityRatio,
+	largeAdViewability,
 	fallbackSlotHeight,
 	unfilledRefresh,
 	viewlessRefresh,
@@ -186,6 +187,12 @@ class SlotData {
 	// force-refresh pass.
 	empty = true;
 
+	// Pixel size of the creative currently in the slot, as `[width, height]`
+	// from slotRenderEnded. Null for an empty slot or a fluid creative, which
+	// reports a string rather than dimensions. Used to pick the right
+	// viewability threshold for the size actually delivered.
+	renderedSize = null;
+
 	// Refreshes that came back without a creative. Reset by a fill, the signal
 	// it tracks - not by a viewable impression, or a slot that started filling
 	// again would stay penalised for a fill problem it no longer has.
@@ -222,6 +229,7 @@ class SlotData {
 			pos: this.slot.getTargeting('pos'),
 			refresh: this.slot.getTargeting(AdRefresher.TARGET_REFRESH_KEY),
 			empty: this.empty,
+			renderedSize: this.renderedSize,
 			viewable: this.viewable,
 			lastRequest: this.lastRequest,
 			lastResponse: this.lastResponse,
@@ -401,6 +409,50 @@ class SlotData {
 	}
 	generateDataId() {
 		return SlotData.generateDataId(this.slot);
+	}
+
+	/**
+	 * The share of a creative's area that has to be in view for GAM to count
+	 * it viewable.
+	 *
+	 * 50% for a standard display ad, but 30% once the creative is large enough
+	 * to fall under the MRC large-ad threshold - see `config.largeAdViewability`.
+	 * 970x250 is exactly at that cutoff and is the smallest common size that
+	 * qualifies; a 300x600 cube is 180000px, well under it, and stays at 50%.
+	 *
+	 * An unknown area (0) yields the standard ratio, which is the stricter of
+	 * the two, so guessing wrong never counts a slot viewable that GAM would
+	 * not.
+	 *
+	 * @param area Creative area in square pixels
+	 * @returns {number} Ratio between 0 and 1
+	 */
+	static viewabilityRatioForArea(area = 0) {
+		if (
+			largeAdViewability?.minimumArea &&
+			Number.isFinite(area) &&
+			area >= largeAdViewability.minimumArea
+		) {
+			return largeAdViewability.ratio ?? viewabilityRatio;
+		}
+		return viewabilityRatio;
+	}
+
+	/**
+	 * Area of the creative currently in the slot, in square pixels, or 0 when
+	 * no fixed-size creative is rendered.
+	 *
+	 * @returns {number}
+	 */
+	get renderedArea() {
+		if (!Array.isArray(this.renderedSize)) {
+			return 0;
+		}
+		const [width, height] = this.renderedSize;
+		if (!Number.isFinite(width) || !Number.isFinite(height)) {
+			return 0;
+		}
+		return width * height;
 	}
 
 	/**
@@ -641,8 +693,10 @@ class SlotData {
 			const visibleArea = overlapWidth * overlapHeight;
 			const elVisibility = visibleArea / elementArea;
 
-			// Returns true only if 50% or more of the element's area is visible
-			const isVisible = elVisibility >= viewabilityRatio;
+			// Threshold comes from the projected area, since a large creative
+			// needs a smaller share of itself on screen than a standard one.
+			const isVisible =
+				elVisibility >= SlotData.viewabilityRatioForArea(elementArea);
 
 			return isVisible;
 		} finally {
@@ -1255,6 +1309,8 @@ class AdRefresher {
 			slotData.lastRequest = new Date();
 		}
 		slotData.lastRendered = new Date();
+		// Only a fixed size is useful here; a fluid creative reports a string.
+		slotData.renderedSize = Array.isArray(e.size) ? e.size : null;
 		if (e.isEmpty) {
 			slotData.empty = true;
 		} else {
@@ -1273,6 +1329,9 @@ class AdRefresher {
 	/**
 	 * Keeps `SlotData.viewable` current from GPT's own viewport reporting,
 	 * which is cheaper and more accurate than re-measuring on every tick.
+	 *
+	 * This is the one place the delivered creative's size is known exactly, so
+	 * the large-ad threshold applies without having to infer a size.
 	 */
 	listenForSlotViewable(e) {
 		const slot = e.slot;
@@ -1280,12 +1339,12 @@ class AdRefresher {
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
 		}
-		const viewable = e.inViewPercentage;
-		if (viewable >= viewabilityRatio * 100) {
-			slotData.viewable = true;
-		} else {
-			slotData.viewable = false;
-		}
+		// GPT measures the creative that is actually rendered, so the threshold
+		// can come from the delivered size rather than a guess. Falls back to
+		// the standard ratio when nothing fixed-size is rendered.
+		const required =
+			SlotData.viewabilityRatioForArea(slotData.renderedArea) * 100;
+		slotData.viewable = e.inViewPercentage >= required;
 	}
 
 	/**
