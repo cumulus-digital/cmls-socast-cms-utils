@@ -335,8 +335,10 @@ class SlotData {
 		this._viewable = !!val;
 	}
 
-	// The timestamp setters below all default to "now" when passed a falsy
-	// value, so callers can write `slotData.lastRequest = null` to stamp it.
+	// The timestamp setters below default to "now" when passed a falsy value,
+	// so callers can write `slotData.lastRequest = null` to stamp it.
+	// `lastResponse` is the exception: it only ever mirrors what GPT reports,
+	// so it assigns what it is given.
 
 	get lastRequest() {
 		return this._lastRequest;
@@ -1092,6 +1094,16 @@ class AdRefresher {
 			);
 		}
 
+		// The same floor `every` gets. `minimumGap` hands this straight to
+		// empty slots, so a config below the policy minimum would breach the
+		// request rate on the undelivered path without it.
+		if (this.undeliveredRefreshTime < GAM_MINIMUM_REFRESH_GAP) {
+			this.log.warn(
+				`Undelivered refresh time of ${this.undeliveredRefreshTime}ms is below the ${GAM_MINIMUM_REFRESH_GAP / 1000}s floor, clamping.`
+			);
+			this.undeliveredRefreshTime = GAM_MINIMUM_REFRESH_GAP;
+		}
+
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
 			log.info(
 				'Global condition check failed, will not refresh ads.',
@@ -1105,7 +1117,7 @@ class AdRefresher {
 		// Get the existing slots
 		this.log.debug('Gathering existing slots.');
 		adTag.getSlots().forEach((slot) => {
-			let slotData = this.setSlotData(slot);
+			let slotData = this.getOrCreateSlotData(slot);
 
 			if (adTag.wasSlotRequested(slot)) {
 				slotData.lastRequest = new Date();
@@ -1220,31 +1232,27 @@ class AdRefresher {
 	}
 
 	/**
-	 * Creates the slot's data if it does not exist yet, applies `newData` to
-	 * it, and returns it. Called with no `newData` purely to get-or-create.
+	 * Returns the slot's data, creating and registering it on first sight.
 	 *
-	 * `newData` keys are assigned, so accessor-backed properties such as
-	 * `lastRequest` and `refreshKey` run their setters.
+	 * Callers mutate the returned instance directly - the Map holds the same
+	 * reference, so there is nothing to write back.
 	 *
 	 * @returns {SlotData}
 	 */
-	setSlotData(slot, newData = {}) {
+	getOrCreateSlotData(slot) {
 		if (!SlotData.isGoogleSlot(slot)) {
-			throw new Error('setSlotData must be passed a googletag.Slot');
+			throw new Error('getOrCreateSlotData must be passed a googletag.Slot');
 		}
-		let newSlot = this.getSlotData(slot);
-		const creating = !newSlot;
-		if (creating) {
-			newSlot = new SlotData(this, slot);
+		let slotData = this.getSlotData(slot);
+		if (!slotData) {
+			slotData = new SlotData(this, slot);
+			this.slots.set(slotData.id, slotData);
+			this.log.debug(() => [
+				`Creating slot data for ${slotData.id}`,
+				slotData.summary,
+			]);
 		}
-		Object.assign(newSlot, newData);
-		this.slots.set(newSlot.id, newSlot);
-		this.log.debug(() => [
-			`${creating ? 'Creating' : 'Setting'} slot data for ${newSlot.id}`,
-			newSlot.summary,
-			newData,
-		]);
-		return this.getSlotData(slot);
+		return slotData;
 	}
 
 	/**
@@ -1260,7 +1268,7 @@ class AdRefresher {
 	 */
 	genericSlotListener(eventName, e) {
 		const slot = e.slot;
-		let slotData = this.setSlotData(slot);
+		let slotData = this.getOrCreateSlotData(slot);
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
 		}
@@ -1277,22 +1285,21 @@ class AdRefresher {
 	 */
 	listenForViewableImpressions(e) {
 		const slot = e.slot;
-		let slotData = this.setSlotData(slot);
-		this.log.debug(() => ['Impression viewable', slotData.summary]);
+		let slotData = this.getOrCreateSlotData(slot);
 		slotData.lastViewableImpression = new Date();
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
 		}
-		if (slotData.neverRefresh) {
-			return;
+		if (!slotData.neverRefresh) {
+			slotData.zeroUnfilledRefreshCount();
+			slotData.zeroViewlessRefreshCount();
 		}
-		slotData.zeroUnfilledRefreshCount();
-		slotData.zeroViewlessRefreshCount();
+		this.log.debug(() => ['Impression viewable', slotData.summary]);
 	}
 
 	listenForSlotRequested(e) {
 		const slot = e.slot;
-		let slotData = this.setSlotData(slot);
+		let slotData = this.getOrCreateSlotData(slot);
 		slotData.lastRequest = new Date();
 		this.log.debug(() => ['Slot requested', slotData.summary]);
 	}
@@ -1304,7 +1311,7 @@ class AdRefresher {
 	 */
 	listenForSlotRenderEnded(e) {
 		const slot = e.slot;
-		let slotData = this.setSlotData(slot);
+		let slotData = this.getOrCreateSlotData(slot);
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
 		}
@@ -1335,7 +1342,7 @@ class AdRefresher {
 	 */
 	listenForSlotViewable(e) {
 		const slot = e.slot;
-		let slotData = this.setSlotData(slot);
+		let slotData = this.getOrCreateSlotData(slot);
 		if (!slotData.lastRequest) {
 			slotData.lastRequest = new Date();
 		}
@@ -1426,7 +1433,6 @@ class AdRefresher {
 
 		const now = new Date();
 		const logTick = this.tickShouldLog(now);
-		if (!this.lastTickLogged) this.lastTickLogged = now;
 
 		if (logTick) {
 			this.log.debug(
