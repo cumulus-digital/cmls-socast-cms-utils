@@ -1,13 +1,20 @@
 {
 	"scriptName": "AUTO REFRESH ADS",
 	"nameSpace": "autoRefreshAds",
-	"version": "0.7",
+	"version": "0.8",
 
 	"defaultRefreshInMinutes": 1,
 	"refreshUndeliveredInMilliseconds": 35000,
 
 	"testForViewability": true,
 	"viewabilityRatio": 0.5,
+
+	"fallbackSlotHeight": {
+		"_c": "Assumed creative height in px for slots that report no size of their own (out-of-page, fluid). Keeps a collapsed slot sitting near the fold from passing the viewability test. Set to null to fall back to bare viewport intersection instead.",
+		"matchMedia": "only screen and (max-width: 760px)",
+		"matched": 50,
+		"default": 90
+	},
 
 	"tickInterval": 2000,
 

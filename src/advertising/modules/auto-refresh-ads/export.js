@@ -26,6 +26,10 @@
  * Slots carrying `always_refresh` targeting, or a `pos` value listed in
  * `config.ALWAYS_REFRESH_POS`, refresh regardless of viewability.
  *
+ * Neither pass runs while the page is in a background tab, and time spent
+ * hidden is added back to every armed timer, so a tab left open for an hour
+ * does not come back and refresh every slot at once.
+ *
  * Public interface (all optional):
  * - `window.DISABLE_AUTO_REFRESH_ADS` - truthy disables the module
  * - `window._CMLS.autoRefreshAdsInterval` - refresh interval in minutes, or 0
@@ -46,6 +50,7 @@ const {
 	defaultRefreshInMinutes,
 	testForViewability,
 	viewabilityRatio,
+	fallbackSlotHeight,
 	tickInterval,
 	excludeFromForcedRefresh,
 } = config;
@@ -339,6 +344,157 @@ class SlotData {
 	}
 
 	/**
+	 * The largest size this slot could render at the current viewport.
+	 *
+	 * Tallest wins, widest breaks a tie: height is what decides whether a
+	 * creative crosses the fold, and the largest candidate is the worst case
+	 * for viewability, which is the one worth gating a refresh on.
+	 *
+	 * @param slot googletag.Slot
+	 * @returns {{width: number, height: number}|null} null for a slot with no
+	 *          fixed size, such as an out-of-page or fluid-only slot.
+	 */
+	static getLargestSlotSize(slot = null) {
+		if (
+			!SlotData.isGoogleSlot(slot) ||
+			typeof slot.getSizes !== 'function'
+		) {
+			return null;
+		}
+
+		// Viewport dimensions are passed explicitly so that a slot carrying a
+		// size mapping resolves here the same way it does when GPT requests
+		// it, rather than depending on what GPT last measured.
+		const sizes =
+			slot.getSizes(window.innerWidth, window.innerHeight) || [];
+
+		let largest = null;
+		sizes.forEach((size) => {
+			// `width`/`height` is the shape the rest of the ad stack reads
+			// these with; see interfaces/aps-gpt.js. The numeric guard is what
+			// drops the 'fluid' string and any zero-area entry.
+			const width = size?.width;
+			const height = size?.height;
+			if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+			if (width <= 0 || height <= 0) return;
+			if (
+				!largest ||
+				height > largest.height ||
+				(height === largest.height && width > largest.width)
+			) {
+				largest = { width, height };
+			}
+		});
+
+		return largest;
+	}
+
+	/**
+	 * The assumed creative height for a slot that reports no size of its own.
+	 *
+	 * Out-of-page and fluid slots return nothing usable from `getSizes()`,
+	 * which would leave the viewability test with no box to measure and drop it
+	 * back to bare viewport intersection - where a collapsed slot one pixel
+	 * above the fold counts as viewable. A conservative minimum height stands
+	 * in instead: still a guess, but one that requires roughly half of it to be
+	 * on screen rather than a single pixel.
+	 *
+	 * Height only. A block-level slot reports its container's width even when
+	 * collapsed, so the element's own measurement beats anything guessed here.
+	 *
+	 * Evaluated per call rather than cached so a rotation or resize is picked
+	 * up. `config.fallbackSlotHeight` may be null to disable the fallback.
+	 *
+	 * @returns {number} 0 when no fallback is configured.
+	 */
+	static getFallbackHeight() {
+		if (!fallbackSlotHeight) {
+			return 0;
+		}
+		if (
+			fallbackSlotHeight.matchMedia &&
+			window.matchMedia(fallbackSlotHeight.matchMedia).matches
+		) {
+			return fallbackSlotHeight.matched || 0;
+		}
+		return fallbackSlotHeight.default || 0;
+	}
+
+	/**
+	 * The box a delivered creative would occupy, for a slot that does not
+	 * currently have a measurable one.
+	 *
+	 * A collapsed slot has no height, so its own geometry says nothing about
+	 * how much of the viewport a creative would cover - measuring it directly
+	 * would treat a slot one pixel above the fold as fully viewable, when the
+	 * creative that arrives would hang almost entirely below it. Any zero
+	 * dimension is therefore replaced with the slot's largest configured size.
+	 *
+	 * The projection grows down and to the right from the element's current
+	 * top-left corner. A collapsed div is out of flow, so that corner is where
+	 * a creative would be inserted: it pushes the content below it down and
+	 * leaves everything above it where it is. That does not hold for a slot
+	 * centred by a flex or grid parent, or absolutely positioned, where the
+	 * box would instead grow around the element.
+	 *
+	 * Each dimension is filled in independently, from the slot's own sizes
+	 * where GPT reports them and from `getFallbackHeight()` where it does not,
+	 * so a slot that measures in one axis but not the other keeps the real
+	 * measurement for the axis it has.
+	 *
+	 * @param slot googletag.Slot
+	 * @param rect The element's current DOMRect
+	 * @returns {{top: number, left: number, right: number, bottom: number,
+	 *           width: number, height: number}|null} null when neither the
+	 *          element, the slot's sizes, nor the configured fallback yield a
+	 *          dimension.
+	 */
+	static projectSlotBox(slot = null, rect = null) {
+		if (!rect) {
+			return null;
+		}
+
+		// Already measurable, nothing to project.
+		if (rect.width > 0 && rect.height > 0) {
+			return rect;
+		}
+
+		let width = rect.width;
+		let height = rect.height;
+
+		const size = SlotData.getLargestSlotSize(slot);
+		if (size) {
+			if (width <= 0) width = size.width;
+			if (height <= 0) height = size.height;
+		}
+
+		if (height <= 0) {
+			height = SlotData.getFallbackHeight();
+		}
+
+		// Last resort for a slot with no measurable width at all, which a
+		// block-level element in flow should never be. Viewport width makes the
+		// horizontal term of the area ratio neutral rather than inventing a
+		// clipping edge that is not there.
+		if (width <= 0) {
+			width = window.innerWidth;
+		}
+
+		if (width <= 0 || height <= 0) {
+			return null;
+		}
+
+		return {
+			top: rect.top,
+			left: rect.left,
+			right: rect.left + width,
+			bottom: rect.top + height,
+			width,
+			height,
+		};
+	}
+
+	/**
 	 * Checks if a provided slot is within the viewport by at
 	 * least `config.viewabilityRatio`
 	 *
@@ -348,6 +504,11 @@ class SlotData {
 	 * restore it afterwards, answering "would this slot be viewable if GPT had
 	 * not collapsed it". The restore runs in a `finally` so the div is never
 	 * left visible if an early return or a throw happens mid-measure.
+	 *
+	 * Revealing the div does not give it a height, since there is no creative
+	 * inside it to give it one, so the dimensions measured against the
+	 * viewport come from `SlotData.projectSlotBox()` rather than straight from
+	 * the element.
 	 *
 	 * @param slot googletag.Slot
 	 * @param reveal Force element to be visible before testing
@@ -390,10 +551,13 @@ class SlotData {
 			}
 
 			const rect = el.getBoundingClientRect();
-			const elementWidth = rect.width;
-			const elementHeight = rect.height;
+			const box = SlotData.projectSlotBox(slot, rect);
 
-			if (elementWidth === 0 || elementHeight === 0) {
+			if (!box) {
+				// Nothing to measure and nothing to stand in for it, which
+				// means `config.fallbackSlotHeight` has been disabled. Bare
+				// intersection with the viewport is then the most that can
+				// honestly be said about a slot of unknowable size.
 				return (
 					rect.top < window.innerHeight &&
 					rect.bottom > 0 &&
@@ -405,16 +569,15 @@ class SlotData {
 			// Calculate the overlapping dimensions between the slot and the viewport boundaries
 			const overlapWidth = Math.max(
 				0,
-				Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
+				Math.min(box.right, window.innerWidth) - Math.max(box.left, 0)
 			);
 			const overlapHeight = Math.max(
 				0,
-				Math.min(rect.bottom, window.innerHeight) -
-					Math.max(rect.top, 0)
+				Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0)
 			);
 
 			// Calculate the total area vs visible area
-			const elementArea = elementWidth * elementHeight;
+			const elementArea = box.width * box.height;
 			const visibleArea = overlapWidth * overlapHeight;
 			const elVisibility = visibleArea / elementArea;
 
@@ -547,7 +710,15 @@ class AdRefresher {
 	// logged on change rather than on a timer.
 	lastNotForcedRefresh = null;
 
+	// When the page was last hidden, or null while it is visible. Used to push
+	// armed refresh timers forward by however long the tab spends backgrounded.
+	hiddenSince = null;
+
 	boundListeners = {};
+
+	// Held separately from `boundListeners`: those are googletag events removed
+	// through the adTag interface, this one is a DOM event on `document`.
+	boundVisibilityListener = null;
 
 	/**
 	 * @param milliseconds Refresh interval. Overridden by
@@ -629,6 +800,18 @@ class AdRefresher {
 		Object.entries(this.boundListeners).forEach(([e, fn]) =>
 			adTag.addListener(e, fn)
 		);
+
+		this.boundVisibilityListener =
+			this.listenForVisibilityChange.bind(this);
+		document.addEventListener(
+			'visibilitychange',
+			this.boundVisibilityListener
+		);
+		// The page may already be in a background tab by the time we load, in
+		// which case no visibilitychange fires until it is brought forward.
+		if (document.hidden) {
+			this.hiddenSince = new Date();
+		}
 
 		this.initInterval();
 
@@ -835,6 +1018,50 @@ class AdRefresher {
 	}
 
 	/**
+	 * Keeps refresh timers honest across a backgrounded tab.
+	 *
+	 * Refresh timers are wall-clock, and nothing in a hidden tab can record a
+	 * viewable impression. Left alone, a tab parked in the background would
+	 * come back with every armed timer long expired and refresh the whole page
+	 * at once - a burst of requests aimed at a reader who is still scrolling.
+	 * Time spent hidden is added back to every armed timer instead, so each
+	 * slot still gets a full interval of foreground time before it refreshes.
+	 *
+	 * Timers are only adjusted on the way back to visible, so the arithmetic
+	 * happens once per background stint rather than once per tick.
+	 */
+	listenForVisibilityChange() {
+		if (document.hidden) {
+			if (!this.hiddenSince) {
+				this.hiddenSince = new Date();
+			}
+			return;
+		}
+
+		if (!this.hiddenSince) {
+			return;
+		}
+
+		const hiddenFor = Date.now() - this.hiddenSince.getTime();
+		this.hiddenSince = null;
+
+		if (hiddenFor <= 0) {
+			return;
+		}
+
+		this.slots.forEach((slotData) => {
+			if (!slotData.nextRefresh) return;
+			slotData.nextRefresh = new Date(
+				slotData.nextRefresh.getTime() + hiddenFor
+			);
+		});
+
+		this.log.debug(
+			`Page was hidden for ${Math.round(hiddenFor / 1000)}s, armed refresh timers pushed forward to match.`
+		);
+	}
+
+	/**
 	 * Arms the slot's refresh timer and marks it as pending in targeting.
 	 *
 	 * @param slot googletag.Slot
@@ -904,6 +1131,14 @@ class AdRefresher {
 		}
 
 		if (this.checkGlobalConditions() !== this.globalStates.RUNNING) {
+			return;
+		}
+
+		// A slot in a hidden tab cannot record a viewable impression, so a
+		// refresh here would only spend one. Both passes below are skipped
+		// wholesale, including the always-refresh slots that otherwise bypass
+		// the viewability check. `listenForVisibilityChange` covers the gap.
+		if (document.hidden) {
 			return;
 		}
 
@@ -1162,6 +1397,14 @@ class AdRefresher {
 		Object.entries(this.boundListeners).forEach(([e, fn]) =>
 			adTag.removeListener(e, fn)
 		);
+
+		if (this.boundVisibilityListener) {
+			document.removeEventListener(
+				'visibilitychange',
+				this.boundVisibilityListener
+			);
+			this.boundVisibilityListener = null;
+		}
 	}
 }
 
