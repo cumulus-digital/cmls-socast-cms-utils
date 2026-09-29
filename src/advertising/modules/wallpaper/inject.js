@@ -130,6 +130,7 @@ const log = new window.__CMLSINTERNAL.Logger(
 					targeting: {
 						pos: this.pos,
 						noprebid: 'noprebid',
+						never_refresh: 'true',
 					},
 				});
 				if (!this.slot) {
