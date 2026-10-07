@@ -1,4 +1,4 @@
-export default () => {
+export default (injectPoint) => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
 	const scriptName = 'PAID CONTENT / REVCONTENT';
 	const version = '0.1';
@@ -7,23 +7,25 @@ export default () => {
 	let pubId = '144840',
 		widgetId = '';
 
+	if (!injectPoint) {
+		log.warn('No inject point given!');
+		return;
+	}
+
 	function isMobile() {
 		return window.matchMedia('only screen and (max-width: 760px)').matches;
 	}
 
 	if (document.body.classList.contains('home')) {
 		widgetId = isMobile() ? '286638' : '286768';
-	} else if (document.body.classList.contains('single-post')) {
+	} else if (
+		document.body.classList.contains('single-post') ||
+		document.body.id === 'playerBody'
+	) {
 		widgetId = isMobile() ? '286636' : '286635';
 	}
 
 	if (widgetId) {
-		const scContent = document.querySelector('.sc-content');
-		if (!scContent) {
-			log.info('Could not find sc-content');
-			return;
-		}
-
 		const alreadyExists = document.querySelector(
 			'[data-widget-host="revcontent"]'
 		);
@@ -46,8 +48,8 @@ export default () => {
 				async
 			></script>
 		);
-		scContent.append(div);
-		scContent.append(scr);
+		injectPoint.append(div);
+		injectPoint.append(scr);
 		log.info('Injected');
 	}
 };

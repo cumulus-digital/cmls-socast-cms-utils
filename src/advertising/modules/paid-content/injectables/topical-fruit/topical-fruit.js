@@ -1,20 +1,20 @@
 import styles from './styles.scss?url';
 
-export default () => {
+export default (injectPoint) => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
 	const scriptName = 'PAID CONTENT / TOPICALFRUIT';
 	const version = '0.1';
 	const log = new Logger(`${scriptName} ${version}`);
 
+	if (!injectPoint) {
+		log.warn('No inject point given!');
+		return;
+	}
+
 	/**
 	 * Topical Fruit is not allowed on News, Talk, and Urban stations.
 	 */
 	const DISALLOWED_SGROUPS = ['news', 'talk', 'urban'];
-
-	const valid_containers = [
-		'body:is(.single-post, .home) .sc-content',
-		'body#playerBody .entry-content .wpb_column:first-child .blogNewsWidget',
-	];
 
 	window.self.googletag = window.self.googletag || {};
 	window.self.googletag.cmd = window.self.googletag.cmd || [];
@@ -38,14 +38,6 @@ export default () => {
 			return;
 		}
 
-		var contentContainer = document.querySelector(
-			valid_containers.join(',')
-		);
-		if (!contentContainer) {
-			log.info('Could not find content container.');
-			return;
-		}
-
 		const className = 'dml-widget-container';
 		const scrSrc = 'https://c.go-fet.ch/a/embed.js';
 
@@ -62,18 +54,13 @@ export default () => {
 		let injectedDiv = false,
 			injectedScript = false;
 		if (!document.querySelector(`.${className}`)) {
-			contentContainer.append(div);
+			injectPoint.append(div);
 			injectedDiv = true;
 		}
 		if (!document.querySelector(`script[src="${scrSrc}"]`)) {
-			contentContainer.append(scr);
-			const link = (
-				<link
-					rel="stylesheet"
-					href={styles}
-				/>
-			);
-			contentContainer.append(link);
+			injectPoint.append(scr);
+			const link = <link rel="stylesheet" href={styles} />;
+			injectPoint.append(link);
 			// import(
 			// 	/* webpackChunkName: "advertising/paid-content/topical-fruit" */
 			// 	'./styles.scss'
