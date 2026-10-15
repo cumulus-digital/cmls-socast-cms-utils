@@ -1,0 +1,10 @@
+{
+	"scriptName": "PAID CONTENT",
+	"nameSpace": "paidContent",
+	"version": "0.2",
+
+	"injectables": {
+		"#TopicalFruit": "./injectables/topical-fruit/topical-fruit.js",
+		"revContent": "./injectables/rev-content.js"
+	}
+}

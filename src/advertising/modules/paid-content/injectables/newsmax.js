@@ -1,6 +1,8 @@
+import config from '../config.json';
+
 export default () => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
-	const scriptName = 'PAID CONTENT INJECTOR / AROUNDTHEWEB';
+	const scriptName = `${config.scriptName} / AROUNDTHEWEB`;
 	const version = '0.2';
 	const log = new Logger(`${scriptName} ${version}`);
 

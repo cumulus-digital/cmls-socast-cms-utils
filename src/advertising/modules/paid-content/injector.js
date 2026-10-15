@@ -1,16 +1,13 @@
-((window, undefined) => {
-	const injectables = {
-		TopicalFruit: './injectables/topical-fruit/topical-fruit.js',
-		//revContent: './injectables/rev-content.js',
-	};
+import config from './config.json';
 
-	const scriptName = 'PAID CONTENT RUNNER';
-	const nameSpace = 'paidContentRunner';
-	const version = '0.1';
+((window, undefined) => {
+	const injectables = config.injectables;
+
+	const scriptName = config.scriptName + ' / RUNNER';
 
 	const { h, domReady, getBasicPost, Logger } = window.__CMLSINTERNAL.libs;
 
-	const log = new Logger(`${scriptName} ${version}`);
+	const log = new Logger(`${scriptName} ${config.version}`);
 
 	const valid_containers = [
 		'body:is(.single-post, .home) .sc-content',
@@ -33,6 +30,8 @@
 		const stringInjectors = [];
 
 		for (const i in injectables) {
+			if (i.startsWith('#')) continue;
+
 			if (typeof injectables[i] === 'function') {
 				functionInjectors.push([i, injectables[i]]);
 			} else if (typeof injectables[i] === 'string') {

@@ -1,8 +1,10 @@
+import config from '../../config.json';
+
 import styles from './styles.scss?url';
 
 export default (injectPoint) => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
-	const scriptName = 'PAID CONTENT / TOPICALFRUIT';
+	const scriptName = `${config.scriptName} / TOPICALFRUIT`;
 	const version = '0.1';
 	const log = new Logger(`${scriptName} ${version}`);
 

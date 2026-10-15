@@ -1,6 +1,8 @@
+import config from '../config.json';
+
 export default (injectPoint) => {
 	const { h, Fragment, Logger } = window.__CMLSINTERNAL.libs;
-	const scriptName = 'PAID CONTENT / REVCONTENT';
+	const scriptName = `${config.scriptName} / REVCONTENT`;
 	const version = '0.1';
 	const log = new Logger(`${scriptName} ${version}`);
 
@@ -34,22 +36,24 @@ export default (injectPoint) => {
 			return;
 		}
 
-		const div = (
-			<div
-				data-widget-host="revcontent"
-				data-pub-id={pubId}
-				data-widget-id={widgetId}
-			></div>
-		);
+		const style = <style></style>;
+		style.innerHTML =
+			':root .sbn-item-anchor { color: inherit !important; }';
 
-		const scr = (
-			<script
-				src={`https://delivery.revcontent.com/${pubId}/${widgetId}/widget.js`}
-				async
-			></script>
+		injectPoint.append(
+			<div style="margin-top: 1em;">
+				{style}
+				<div
+					data-widget-host="revcontent"
+					data-pub-id={pubId}
+					data-widget-id={widgetId}
+				></div>
+				<script
+					src={`https://delivery.revcontent.com/${pubId}/${widgetId}/widget.js`}
+					async
+				></script>
+			</div>
 		);
-		injectPoint.append(div);
-		injectPoint.append(scr);
 		log.info('Injected');
 	}
 };

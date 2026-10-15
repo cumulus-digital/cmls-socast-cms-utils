@@ -1,9 +1,9 @@
-const scriptName = 'PAID CONTENT IMPORTER';
-const nameSpace = 'paidContentImporter';
-const version = '0.1';
+import config from './config.json';
+
+const scriptName = config.scriptName + ' / IMPORTER';
 
 const { Logger } = window.__CMLSINTERNAL.libs;
-const log = new Logger(`${scriptName} ${version}`);
+const log = new Logger(`${scriptName} ${config.version}`);
 
 export default () => {
 	const waiting = (resolve) => {
