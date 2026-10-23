@@ -6,6 +6,8 @@ const { h, Logger, domReady, waitFor } = window.__CMLSINTERNAL.libs;
 const { scriptName, nameSpace, version, defaultOptions } = config;
 const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 
+//import { gpcBanner } from './gpc-banner';
+
 ((window, undefined) => {
 	if (window?._CMLS_CMP_DISABLE_OT_OPT) {
 		log.warn(
@@ -62,6 +64,8 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 				</li>
 			);
 		} else {
+			log.warn('Footer nav not found!');
+			/*
 			let footerBanner = (
 				<div id="te-footer-msg">
 					<div class="inner">
@@ -76,6 +80,7 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 			} else {
 				document.body.append(footerBanner);
 			}
+			*/
 		}
 	};
 
@@ -100,6 +105,10 @@ const log = new window.__CMLSINTERNAL.Logger(`${scriptName} Loader ${version}`);
 	} else {
 		log.info('Banner already exists in HTML.');
 	}
+
+	try {
+		gpcBanner();
+	} catch (e) {}
 
 	// Inject preferences link for player overlay
 	domReady(() => {
